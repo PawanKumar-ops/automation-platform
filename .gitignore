@@ -1,0 +1,63 @@
+
+# Dependencies (all nested folders)
+node_modules/
+.pnp/
+.pnp.js
+
+# Environment variables
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Expo / React Native
+.expo/
+.expo-shared/
+web-build/
+expo-env.d.ts
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+coverage/
+
+# Cache
+.cache/
+.turbo/
+.parcel-cache/
+.eslintcache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Testing
+.nyc_output/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Android / iOS generated files
+android/
+ios/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# Local databases
+*.sqlite
+*.sqlite3
