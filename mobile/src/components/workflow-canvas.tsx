@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Path, Pattern, Rect, Stop } from 'react-native-svg';
 
+import { AiChatDrawer } from '@/components/ai-chat-drawer';
 import { AiMark } from '@/components/ai-mark';
 import { IconifyIcon } from '@/components/iconify-icon';
 
@@ -408,6 +409,7 @@ export function WorkflowCanvas() {
   const [running, setRunning] = useState(false);
   const [view, setView] = useState({ w: 390, h: 640 });
   const drawerAnim = useRef(new Animated.Value(0)).current;
+  const [aiOpen, setAiOpen] = useState(false);
 
   const { pos, width, height } = useMemo(() => layout(nodes), [nodes]);
 
@@ -1153,9 +1155,9 @@ export function WorkflowCanvas() {
               <IconifyIcon color="#2A2B2D" name="lucide:download" size={18} />
             </Pressable>
             <Pressable
-              accessibilityLabel="Add step"
-              onPress={() => openDrawer({ mode: 'child', parent: selected ?? nodes[0]?.key ?? null })}
-              style={styles.toolPrimary}>
+              accessibilityLabel="Open AI chat"
+              onPress={() => setAiOpen(true)}
+              style={[styles.toolPrimary, aiOpen && { opacity: 0 }]}>
               <AiMark />
             </Pressable>
             <Pressable accessibilityLabel="Undo" onPress={undo} style={styles.toolBtn}>
@@ -1198,6 +1200,8 @@ export function WorkflowCanvas() {
             })()
             : null}
         </View>
+
+        {aiOpen ? <AiChatDrawer onClosed={() => setAiOpen(false)} /> : null}
 
         {target ? (
           <Drawer anim={drawerAnim} onClose={closeDrawer} onPick={pick} title={drawerTitle} />

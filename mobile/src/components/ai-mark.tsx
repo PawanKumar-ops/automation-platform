@@ -12,10 +12,11 @@ const COUNT = AI_MARK_SEQUENCE.length;
  * and blends each traced frame into the next, so motion reads smoother than
  * the source's 30fps steps while keeping the same timing.
  */
-export function AiMark({ size = 64 }: { size?: number }) {
+export function AiMark({ size = 64, animated = true }: { size?: number; animated?: boolean }) {
   const [pos, setPos] = useState(0);
 
   useEffect(() => {
+    if (!animated) return;
     let raf = 0;
     const start = Date.now();
     const tick = () => {
@@ -24,7 +25,7 @@ export function AiMark({ size = 64 }: { size?: number }) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [animated]);
 
   const i = Math.floor(pos);
   const frac = pos - i;
