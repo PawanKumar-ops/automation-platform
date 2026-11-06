@@ -16,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, Ellipse, LinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { AiMark } from '@/components/ai-mark';
 import { IconifyIcon } from '@/components/iconify-icon';
@@ -220,6 +221,57 @@ function useMouseDragScroll(ref: RefObject<ComponentRef<typeof ScrollView> | nul
   }, [ref]);
 }
 
+/** Very soft pastel aura behind the composer; the sheet stays essentially white. */
+function SoftGlow() {
+  return (
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
+      <Svg height="100%" preserveAspectRatio="none" viewBox="0 0 100 100" width="100%">
+        <Defs>
+          <RadialGradient cx="50%" cy="50%" id="mint" r="50%">
+            <Stop offset="0" stopColor="#B9F0D8" stopOpacity="0.55" />
+            <Stop offset="1" stopColor="#B9F0D8" stopOpacity="0" />
+          </RadialGradient>
+          <RadialGradient cx="50%" cy="50%" id="sky" r="50%">
+            <Stop offset="0" stopColor="#C4DEFF" stopOpacity="0.6" />
+            <Stop offset="1" stopColor="#C4DEFF" stopOpacity="0" />
+          </RadialGradient>
+          <RadialGradient cx="50%" cy="50%" id="lilac" r="50%">
+            <Stop offset="0" stopColor="#E3DAFF" stopOpacity="0.55" />
+            <Stop offset="1" stopColor="#E3DAFF" stopOpacity="0" />
+          </RadialGradient>
+          <RadialGradient cx="50%" cy="50%" id="top" r="50%">
+            <Stop offset="0" stopColor="#E6F0FF" stopOpacity="0.45" />
+            <Stop offset="1" stopColor="#E6F0FF" stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        <Rect fill="#FFFFFF" height="100" width="100" x="0" y="0" />
+        <Ellipse cx="30" cy="101" fill="url(#mint)" rx="34" ry="8" />
+        <Ellipse cx="55" cy="100" fill="url(#sky)" rx="34" ry="7" />
+        <Ellipse cx="80" cy="101" fill="url(#lilac)" rx="30" ry="8" />
+      </Svg>
+    </View>
+  );
+}
+
+/** White at the top, fading to fully transparent at the bottom of the header. */
+function HeaderFade() {
+  return (
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
+      <Svg height="100%" preserveAspectRatio="none" viewBox="0 0 1 1" width="100%">
+        <Defs>
+          <LinearGradient id="hf" x1="0" x2="0" y1="0" y2="1">
+            <Stop offset="0" stopColor="#FFFFFF" stopOpacity="1" />
+            <Stop offset="0.62" stopColor="#FFFFFF" stopOpacity="1" />
+            <Stop offset="0.82" stopColor="#FFFFFF" stopOpacity="0.6" />
+            <Stop offset="1" stopColor="#FFFFFF" stopOpacity="0" />
+          </LinearGradient>
+        </Defs>
+        <Rect fill="url(#hf)" height="1" width="1" x="0" y="0" />
+      </Svg>
+    </View>
+  );
+}
+
 /* -------------------------------------------------------------- drawer */
 
 const BUTTON = 64;
@@ -268,6 +320,7 @@ export function AiChatDrawer({ onClosed }: { onClosed: () => void }) {
   const [streaming, setStreaming] = useState<{ id: string; full: string; shown: number } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [historyMounted, setHistoryMounted] = useState(false);
+  const [headerH, setHeaderH] = useState(64);
   const [historyQuery, setHistoryQuery] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
@@ -468,8 +521,11 @@ export function AiChatDrawer({ onClosed }: { onClosed: () => void }) {
   const scrimDrag = drag.interpolate({ inputRange: [0, H], outputRange: [1, 0], extrapolate: 'clamp' });
   const scrim = Animated.multiply(scrimOpen, scrimDrag);
 
-  const HW = Math.min(W * 0.86, 330);
-  const historyX = historyAnim.interpolate({ inputRange: [0, 1], outputRange: [-HW - 24, 0], extrapolate: 'clamp' });
+  // Chat and history share the drawer: a quick crossfade with a short slide.
+  const chatOpacity = historyAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0], extrapolate: 'clamp' });
+  const chatX = historyAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -28], extrapolate: 'clamp' });
+  const histOpacity = historyAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: 'clamp' });
+  const histX = historyAnim.interpolate({ inputRange: [0, 1], outputRange: [28, 0], extrapolate: 'clamp' });
   const lastAi = [...messages].reverse().find((m) => m.role === 'ai');
 
   return (
@@ -487,39 +543,14 @@ export function AiChatDrawer({ onClosed }: { onClosed: () => void }) {
           { width, height, bottom, borderRadius: radius, backgroundColor: surface, shadowOpacity, transform: [{ translateY: drag }] },
         ]}>
         <View style={[styles.card, { width: W, height: H }]}>
+          <SoftGlow />
           <Animated.View style={[styles.fill, { opacity: content, transform: [{ translateY: contentY }, { scale: contentScale }] }]}>
-            {/* drag handle + header: swipe down to close */}
-            <View {...dragPan.panHandlers}>
-            <View style={styles.grabber} />
-            <View style={styles.header}>
-              <Pressable accessibilityLabel="Chat history" onPress={() => setShowHistory(true)} style={styles.iconBtn}>
-                <IconifyIcon color="#1B1C1E" name="lucide:rotate-ccw-clock" size={19} />
-              </Pressable>
-              <View style={styles.headerMid}>
-                <AiMark size={30} />
-                <View>
-                  <Text style={styles.title}>Vyn AI</Text>
-                  <View style={styles.statusRow}>
-                    <View style={styles.statusDot} />
-                    <Text style={styles.status}>{busy ? 'Thinking…' : 'Online'}</Text>
-                  </View>
-                </View>
-              </View>
-              <View style={styles.headerRight}>
-                <Pressable accessibilityLabel="New chat" onPress={newChat} style={styles.iconBtn}>
-                  <IconifyIcon color="#1B1C1E" name="lucide:square-pen" size={18} />
-                </Pressable>
-                <Pressable accessibilityLabel="Close" onPress={close} style={styles.iconBtn}>
-                  <IconifyIcon color="#1B1C1E" name="lucide:x" size={19} />
-                </Pressable>
-              </View>
-            </View>
-
-            </View>
-
+            {/* chat page */}
+            <Animated.View
+              style={[styles.page, { opacity: chatOpacity, transform: [{ translateX: chatX }], pointerEvents: showHistory ? 'none' : 'auto' }]}>
             {/* conversation */}
             <ScrollView
-              contentContainerStyle={[styles.thread, { paddingBottom: 16 + kbLift }]}
+              contentContainerStyle={[styles.thread, { paddingTop: headerH + 4, paddingBottom: 16 + kbLift }]}
               keyboardDismissMode="interactive"
               nestedScrollEnabled
               style={styles.threadScroll}
@@ -543,39 +574,31 @@ export function AiChatDrawer({ onClosed }: { onClosed: () => void }) {
                 </View>
               ) : (
                 <>
-                  <Text style={styles.dayLabel}>{active?.group}</Text>
                   {messages.map((m) =>
                     m.role === 'user' ? (
                       <View key={m.id} style={styles.userWrap}>
                         <View style={styles.userBubble}>
-                          <Text style={[styles.msgText, { color: '#FFFFFF' }]}>{m.text}</Text>
+                          <Text style={[styles.msgText, { color: '#1B1C1E' }]}>{m.text}</Text>
                         </View>
-                        <Text style={styles.time}>{m.time}</Text>
                       </View>
                     ) : (
                       <View key={m.id} style={styles.aiWrap}>
-                        <View style={styles.aiAvatar}>
-                          <AiMark animated={false} size={22} />
-                        </View>
                         <View style={styles.aiBody}>
                           <RichText color="#1B1C1E" text={m.text || ' '} />
-                          {streaming?.id !== m.id ? (
+                          {streaming?.id !== m.id && m.id === lastAi?.id ? (
                             <View style={styles.actions}>
                               <Pressable accessibilityLabel="Share" onPress={() => Share.share({ message: m.text }).catch(() => {})} style={styles.action}>
-                                <IconifyIcon color="#8A8B90" name="lucide:share" size={14} />
+                                <IconifyIcon color="#A3A4A8" name="lucide:share" size={14} />
                               </Pressable>
                               <Pressable accessibilityLabel="Good response" onPress={() => rate(m.id, 'up')} style={styles.action}>
-                                <IconifyIcon color={m.rating === 'up' ? '#141518' : '#8A8B90'} name="lucide:thumbs-up" size={14} />
+                                <IconifyIcon color={m.rating === 'up' ? '#141518' : '#A3A4A8'} name="lucide:thumbs-up" size={14} />
                               </Pressable>
                               <Pressable accessibilityLabel="Bad response" onPress={() => rate(m.id, 'down')} style={styles.action}>
-                                <IconifyIcon color={m.rating === 'down' ? '#141518' : '#8A8B90'} name="lucide:thumbs-down" size={14} />
+                                <IconifyIcon color={m.rating === 'down' ? '#141518' : '#A3A4A8'} name="lucide:thumbs-down" size={14} />
                               </Pressable>
-                              {m.id === lastAi?.id ? (
-                                <Pressable accessibilityLabel="Regenerate" onPress={() => regenerate(m.id)} style={styles.action}>
-                                  <IconifyIcon color="#8A8B90" name="lucide:refresh-cw" size={14} />
-                                </Pressable>
-                              ) : null}
-                              <Text style={styles.timeAi}>{m.time}</Text>
+                              <Pressable accessibilityLabel="Regenerate" onPress={() => regenerate(m.id)} style={styles.action}>
+                                <IconifyIcon color="#A3A4A8" name="lucide:refresh-cw" size={14} />
+                              </Pressable>
                             </View>
                           ) : null}
                         </View>
@@ -584,9 +607,6 @@ export function AiChatDrawer({ onClosed }: { onClosed: () => void }) {
                   )}
                   {thinking ? (
                     <View style={styles.aiWrap}>
-                      <View style={styles.aiAvatar}>
-                        <AiMark animated={false} size={22} />
-                      </View>
                       <TypingDots />
                     </View>
                   ) : null}
@@ -597,16 +617,6 @@ export function AiChatDrawer({ onClosed }: { onClosed: () => void }) {
             {/* composer */}
             <Animated.View style={[styles.composerWrap, kbLift > 0 && styles.composerLifted, { transform: [{ translateY: lift }] }]}>
               {kbLift > 0 ? <View style={[styles.composerSkirt, { pointerEvents: 'none' }]} /> : null}
-              {messages.length && !busy && !input ? (
-                <ScrollView contentContainerStyle={styles.quickRow} horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
-                  {SUGGESTIONS.map((s) => (
-                    <Pressable key={s.text} onPress={() => send(s.text)} style={({ pressed }) => [styles.quick, pressed && styles.pressed]}>
-                      <IconifyIcon color="#6B6C71" name={s.icon} size={13} />
-                      <Text style={styles.quickText}>{s.text}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              ) : null}
               <View style={[styles.composer, focused && styles.composerFocused]}>
                 <TextInput
                   multiline
@@ -614,7 +624,8 @@ export function AiChatDrawer({ onClosed }: { onClosed: () => void }) {
                   onChangeText={setInput}
                   onFocus={() => setFocused(true)}
                   onSubmitEditing={() => send()}
-                  placeholder="Message Vyn AI"
+                  numberOfLines={Platform.OS === 'web' ? 1 : undefined}
+                  placeholder="Ask Vyn AI"
                   placeholderTextColor="#9C9DA1"
                   style={styles.input}
                   submitBehavior="blurAndSubmit"
@@ -631,106 +642,128 @@ export function AiChatDrawer({ onClosed }: { onClosed: () => void }) {
                     disabled={!input.trim()}
                     onPress={() => send()}
                     style={({ pressed }) => [styles.sendBtn, !input.trim() && styles.sendOff, pressed && styles.pressed]}>
-                    <IconifyIcon color={input.trim() ? '#FFFFFF' : '#9C9DA1'} name="lucide:arrow-up" size={18} />
+                    <IconifyIcon color={input.trim() ? '#FFFFFF' : '#8A8B90'} name="lucide:arrow-up" size={18} />
                   </Pressable>
                 )}
               </View>
-              {!kbLift ? <Text style={styles.disclaimer}>Vyn AI can make mistakes. Check important steps.</Text> : null}
+            </Animated.View>
             </Animated.View>
 
-            {/* history panel */}
-            {/* Only mounted while open, so an invisible layer can never swallow chat scrolling. */}
+            {/* history page (same drawer, replaces the chat) */}
             {historyMounted ? (
-              <Animated.View style={[StyleSheet.absoluteFill, styles.historyScrim, { opacity: historyAnim }]}>
-                <Pressable accessibilityLabel="Close history" onPress={() => setShowHistory(false)} style={StyleSheet.absoluteFill} />
-              </Animated.View>
-            ) : null}
-            {historyMounted ? (
-            <Animated.View
-              style={[styles.history, { width: HW, pointerEvents: showHistory ? 'auto' : 'none', transform: [{ translateX: historyX }] }]}>
-              <View style={styles.historyHead}>
-                <Text style={styles.historyTitle}>History</Text>
-                <Pressable accessibilityLabel="Close history" hitSlop={6} onPress={() => setShowHistory(false)} style={styles.historyClose}>
-                  <IconifyIcon color="#55565B" name="lucide:x" size={17} />
-                </Pressable>
-              </View>
+              <Animated.View
+                style={[styles.page, styles.pageAbs, { opacity: histOpacity, transform: [{ translateX: histX }], pointerEvents: showHistory ? 'auto' : 'none' }]}>
+                <ScrollView
+                  contentContainerStyle={[styles.historyList, { paddingTop: headerH + 2 }]}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  style={{ flex: 1 }}>
+                  <View style={[styles.search, searchFocused && styles.searchFocused]}>
+                    <IconifyIcon color={searchFocused ? '#141518' : '#A3A4A8'} name="lucide:search" size={16} />
+                    <TextInput
+                      onBlur={() => setSearchFocused(false)}
+                      onChangeText={setHistoryQuery}
+                      onFocus={() => setSearchFocused(true)}
+                      placeholder="Search chats"
+                      placeholderTextColor="#A3A4A8"
+                      returnKeyType="search"
+                      style={styles.searchInput}
+                      value={historyQuery}
+                    />
+                    {historyQuery ? (
+                      <Pressable accessibilityLabel="Clear search" hitSlop={10} onPress={() => setHistoryQuery('')} style={styles.searchClear}>
+                        <IconifyIcon color="#FFFFFF" name="lucide:x" size={11} />
+                      </Pressable>
+                    ) : null}
+                  </View>
 
-              <View style={[styles.search, searchFocused && styles.searchFocused]}>
-                <IconifyIcon color={searchFocused ? '#141518' : '#9A9B9F'} name="lucide:search" size={16} />
-                <TextInput
-                  onBlur={() => setSearchFocused(false)}
-                  onChangeText={setHistoryQuery}
-                  onFocus={() => setSearchFocused(true)}
-                  placeholder="Search"
-                  placeholderTextColor="#A3A4A8"
-                  returnKeyType="search"
-                  style={styles.searchInput}
-                  value={historyQuery}
-                />
-                {historyQuery ? (
-                  <Pressable accessibilityLabel="Clear search" hitSlop={10} onPress={() => setHistoryQuery('')} style={styles.searchClear}>
-                    <IconifyIcon color="#FFFFFF" name="lucide:x" size={11} />
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <ScrollView contentContainerStyle={styles.historyList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-                {groups.map(({ g, items }) => (
-                  <View key={g} style={styles.group}>
-                    <Text style={styles.groupLabel}>{g}</Text>
-                    {items.map((c) => {
-                      const on = c.id === activeId;
-                      const last = c.messages[c.messages.length - 1];
-                      return (
-                        <Pressable
-                          key={c.id}
-                          onPress={() => {
-                            stop();
-                            setActiveId(c.id);
-                            setShowHistory(false);
-                          }}
-                          style={({ pressed }) => [styles.histItem, on && styles.histItemOn, pressed && !on && styles.histItemPressed]}>
-                          <View style={{ flex: 1 }}>
-                            <View style={styles.histTop}>
-                              <Text numberOfLines={1} style={[styles.histTitle, on && { color: '#141518' }]}>{c.title}</Text>
-                              <Text style={styles.histWhen}>{last?.time}</Text>
+                  {groups.map(({ g, items }) => (
+                    <View key={g} style={styles.group}>
+                      <Text style={styles.groupLabel}>{g}</Text>
+                      {items.map((c, idx) => {
+                        const on = c.id === activeId;
+                        const last = c.messages[c.messages.length - 1];
+                        return (
+                          <Pressable
+                            key={c.id}
+                            onPress={() => {
+                              stop();
+                              setActiveId(c.id);
+                              setShowHistory(false);
+                            }}
+                            style={({ pressed }) => [styles.histItem, idx > 0 && styles.histDivider, pressed && styles.histItemPressed]}>
+                            <View style={[styles.histDot, on && styles.histDotOn]} />
+                            <View style={{ flex: 1 }}>
+                              <View style={styles.histTop}>
+                                <Text numberOfLines={1} style={styles.histTitle}>{c.title}</Text>
+                                <Text style={styles.histWhen}>{last?.time}</Text>
+                              </View>
+                              <Text numberOfLines={1} style={styles.histSub}>
+                                {last?.text.replace(/[*`]/g, '').replace(/\n+/g, ' ')}
+                              </Text>
                             </View>
-                            <Text numberOfLines={1} style={styles.histSub}>
-                              {last?.text.replace(/[*`]/g, '').replace(/\n+/g, ' ')}
-                            </Text>
-                          </View>
-                          {on ? (
                             <Pressable
                               accessibilityLabel="Delete chat"
                               hitSlop={8}
                               onPress={() => {
                                 setChats((cs) => cs.filter((x) => x.id !== c.id));
-                                setActiveId(null);
+                                if (on) setActiveId(null);
                                 flash('Chat deleted');
                               }}
                               style={styles.histDelete}>
-                              <IconifyIcon color="#8A8B90" name="lucide:trash" size={14} />
+                              <IconifyIcon color="#B8B9BD" name="lucide:trash" size={14} />
                             </Pressable>
-                          ) : null}
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ))}
-                {!groups.length ? (
-                  <View style={styles.noResults}>
-                    <IconifyIcon color="#C6C7CA" name="lucide:search" size={22} />
-                    <Text style={styles.noResultsText}>No chats found</Text>
-                  </View>
-                ) : null}
-              </ScrollView>
-
-              <Pressable onPress={newChat} style={({ pressed }) => [styles.newChat, pressed && styles.pressed]}>
-                <IconifyIcon color="#FFFFFF" name="lucide:plus" size={17} />
-                <Text style={styles.newChatText}>New chat</Text>
-              </Pressable>
-            </Animated.View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ))}
+                  {!groups.length ? (
+                    <View style={styles.noResults}>
+                      <IconifyIcon color="#C6C7CA" name="lucide:search" size={22} />
+                      <Text style={styles.noResultsText}>No chats found</Text>
+                    </View>
+                  ) : null}
+                </ScrollView>
+              </Animated.View>
             ) : null}
+
+            {/* header overlay: fades into the content scrolling beneath it */}
+            <View
+              {...dragPan.panHandlers}
+              onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
+              style={styles.headerOverlay}>
+              <HeaderFade />
+              <View style={styles.grabber} />
+              <View style={styles.header}>
+                {showHistory ? (
+                  <>
+                    <Pressable accessibilityLabel="Back to chat" onPress={() => setShowHistory(false)} style={styles.iconBtn}>
+                      <IconifyIcon color="#1B1C1E" name="lucide:chevron-left" size={22} />
+                    </Pressable>
+                    <Text style={styles.title}>History</Text>
+                  </>
+                ) : (
+                  <>
+                    <Pressable accessibilityLabel="Chat history" onPress={() => setShowHistory(true)} style={styles.iconBtn}>
+                      <IconifyIcon color="#1B1C1E" name="lucide:rotate-ccw-clock" size={19} />
+                    </Pressable>
+                    <View style={styles.headerMid}>
+                      <AiMark size={28} />
+                      <Text style={styles.title}>Vyn AI</Text>
+                    </View>
+                  </>
+                )}
+                <View style={styles.headerRight}>
+                  <Pressable accessibilityLabel="New chat" onPress={newChat} style={styles.iconBtn}>
+                    <IconifyIcon color="#1B1C1E" name="lucide:square-pen" size={18} />
+                  </Pressable>
+                  <Pressable accessibilityLabel="Close" onPress={close} style={styles.iconBtn}>
+                    <IconifyIcon color="#1B1C1E" name="lucide:x" size={19} />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
 
             {toast ? (
               <View style={[styles.toast, { pointerEvents: 'none' }]}>
@@ -774,27 +807,27 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   ink: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   grabber: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: '#DCDCD8', marginTop: 9 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingTop: 8, paddingBottom: 8 },
-  headerMid: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  headerRight: { flexDirection: 'row', gap: 2 },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F4F4F2' },
-  title: { fontSize: 15, fontWeight: '700', color: '#141518', letterSpacing: -0.3 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 6, paddingBottom: 6 },
+  headerMid: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerRight: { flexDirection: 'row', gap: 0 },
+  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 17, fontWeight: '700', color: '#141518', letterSpacing: -0.4 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1 },
   statusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#2BB673' },
   status: { fontSize: 11, color: '#8A8B90', fontWeight: '500' },
-  thread: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 16, gap: 18, flexGrow: 1 },
+  thread: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, gap: 26, flexGrow: 1 },
   dayLabel: { alignSelf: 'center', fontSize: 11, fontWeight: '600', color: '#A3A4A8', letterSpacing: 0.4, textTransform: 'uppercase' },
   userWrap: { alignItems: 'flex-end', gap: 4 },
-  userBubble: { maxWidth: '82%', backgroundColor: '#141518', paddingHorizontal: 15, paddingVertical: 11, borderRadius: 22, borderBottomRightRadius: 7 },
+  userBubble: { maxWidth: '80%', backgroundColor: '#F2F3F5', paddingHorizontal: 16, paddingVertical: 11, borderRadius: 22, borderBottomRightRadius: 8 },
   time: { fontSize: 10.5, color: '#A9AAAE', marginRight: 4 },
-  aiWrap: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  aiWrap: { flexDirection: 'row', alignItems: 'flex-start' },
   aiAvatar: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F4F4F2', alignItems: 'center', justifyContent: 'center' },
-  aiBody: { flex: 1, paddingTop: 4 },
-  msgText: { fontSize: 14.5, lineHeight: 21, letterSpacing: -0.1 },
+  aiBody: { flex: 1 },
+  msgText: { fontSize: 15, lineHeight: 23, letterSpacing: -0.15 },
   code: { fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), fontSize: 12.5, backgroundColor: '#F1F1EF', color: '#3A3B40' },
   listRow: { flexDirection: 'row', gap: 8 },
   listMark: { fontSize: 14.5, lineHeight: 21, fontWeight: '600', minWidth: 14 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 8, marginLeft: -6 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 10, marginLeft: -7 },
   action: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   timeAi: { fontSize: 10.5, color: '#A9AAAE', marginLeft: 6 },
   typing: { flexDirection: 'row', gap: 5, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 18, backgroundColor: '#F4F4F2' },
@@ -803,13 +836,13 @@ const styles = StyleSheet.create({
   emptyTitle: { marginTop: 18, fontSize: 21, fontWeight: '700', color: '#141518', letterSpacing: -0.6, textAlign: 'center' },
   emptySub: { marginTop: 6, fontSize: 13.5, color: '#8A8B90', textAlign: 'center', lineHeight: 19, maxWidth: 280 },
   suggestGrid: { marginTop: 22, flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
-  suggest: { width: '48%', minHeight: 64, padding: 12, gap: 8, borderRadius: 18, borderWidth: 1, borderColor: '#ECECE9', backgroundColor: '#FAFAF9' },
+  suggest: { width: '48%', minHeight: 64, padding: 12, gap: 8, borderRadius: 18, borderWidth: 1, borderColor: '#EDEEF1', backgroundColor: 'rgba(255,255,255,0.8)' },
   suggestText: { fontSize: 12.5, fontWeight: '600', color: '#2A2B2F', lineHeight: 17 },
   pressed: { opacity: 0.6, transform: [{ scale: 0.98 }] },
   threadScroll: { flex: 1 },
-  composerWrap: { paddingHorizontal: 12, paddingTop: 6, paddingBottom: 10, backgroundColor: '#FFFFFF' },
-  composerLifted: { paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#ECECE9' },
-  composerSkirt: { position: 'absolute', left: 0, right: 0, top: '100%', height: 800, backgroundColor: '#FFFFFF' },
+  composerWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 14, backgroundColor: 'transparent' },
+  composerLifted: { paddingTop: 10, backgroundColor: 'rgba(255,255,255,0.94)' },
+  composerSkirt: { position: 'absolute', left: 0, right: 0, top: '100%', height: 800, backgroundColor: 'rgba(255,255,255,0.94)' },
   quickRow: { gap: 6, paddingBottom: 10, paddingHorizontal: 2 },
   quick: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 30, borderRadius: 15, backgroundColor: '#F4F4F2' },
   quickText: { fontSize: 12, fontWeight: '600', color: '#4A4B50' },
@@ -817,72 +850,53 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
-    minHeight: 52,
+    minHeight: 50,
     paddingLeft: 18,
-    paddingRight: 6,
-    paddingVertical: 6,
-    borderRadius: 26,
-    backgroundColor: '#F4F4F2',
+    paddingRight: 7,
+    paddingVertical: 7,
+    borderRadius: 25,
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: '#E9EAED',
   },
-  composerFocused: { backgroundColor: '#FFFFFF', borderColor: '#E2E2DF' },
+  composerFocused: { borderColor: '#D5D8DE' },
   input: {
     flex: 1,
     maxHeight: 120,
-    minHeight: 40,
-    paddingTop: Platform.OS === 'ios' ? 11 : 8,
-    paddingBottom: Platform.OS === 'ios' ? 11 : 8,
+    minHeight: 36,
+    paddingTop: Platform.OS === 'ios' ? 9 : 6,
+    paddingBottom: Platform.OS === 'ios' ? 9 : 6,
     fontSize: 15.5,
     lineHeight: 20,
     color: '#141518',
     outlineStyle: 'none',
   } as object,
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#141518', alignItems: 'center', justifyContent: 'center' },
-  sendOff: { backgroundColor: '#E6E6E3' },
+  sendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#141518', alignItems: 'center', justifyContent: 'center' },
+  sendOff: { backgroundColor: '#F1F2F4' },
   stopSquare: { width: 12, height: 12, borderRadius: 3, backgroundColor: '#FFFFFF' },
-  disclaimer: { textAlign: 'center', fontSize: 10.5, color: '#AEAFB3', marginTop: 8 },
-  historyScrim: { zIndex: 30, elevation: 30, backgroundColor: 'rgba(14,15,17,0.22)' },
-  history: {
-    zIndex: 31,
-    elevation: 31,
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: 14,
-    borderTopRightRadius: 26,
-    borderBottomRightRadius: 26,
-    shadowColor: '#0B0C0E',
-    shadowOpacity: 0.14,
-    shadowRadius: 28,
-    shadowOffset: { width: 8, height: 0 },
-  },
-  historyHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingLeft: 4 },
-  historyTitle: { fontSize: 22, fontWeight: '700', color: '#141518', letterSpacing: -0.6 },
-  historyClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F4F4F2', alignItems: 'center', justifyContent: 'center' },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 9, height: 42, paddingHorizontal: 13, borderRadius: 21, backgroundColor: '#F4F4F2', borderWidth: 1, borderColor: 'transparent' },
-  searchFocused: { backgroundColor: '#FFFFFF', borderColor: '#E2E2DF' },
-  searchInput: { flex: 1, height: '100%', fontSize: 14.5, color: '#141518', paddingVertical: 0, outlineStyle: 'none' } as object,
+  disclaimer: { textAlign: 'center', fontSize: 10.5, color: '#B4B5B9', marginTop: 8 },
+  headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, paddingBottom: 22, zIndex: 10 },
+  page: { flex: 1 },
+  pageAbs: { ...StyleSheet.absoluteFill },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 9, height: 44, marginHorizontal: 16, paddingHorizontal: 14, borderRadius: 22, backgroundColor: '#F4F5F7', borderWidth: 1, borderColor: 'transparent' },
+  searchFocused: { backgroundColor: '#FFFFFF', borderColor: '#E1E3E7' },
+  searchInput: { flex: 1, height: '100%', fontSize: 15, color: '#141518', paddingVertical: 0, outlineStyle: 'none' } as object,
   searchClear: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#B5B6BA', alignItems: 'center', justifyContent: 'center' },
-  historyList: { paddingTop: 6, paddingBottom: 12 },
-  group: { marginTop: 14 },
-  groupLabel: { marginBottom: 4, marginLeft: 12, fontSize: 11.5, fontWeight: '600', color: '#A3A4A8' },
-  histItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 11, borderRadius: 14 },
-  histItemOn: { backgroundColor: '#F4F4F2' },
-  histItemPressed: { backgroundColor: '#F8F8F6' },
-  histTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  histTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: '#2A2B2F', letterSpacing: -0.2 },
-  histWhen: { fontSize: 11, color: '#AEAFB3' },
-  histSub: { fontSize: 12.5, color: '#9A9B9F', marginTop: 3 },
-  histDelete: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
-  noResults: { marginTop: 48, alignItems: 'center', gap: 8 },
+  historyList: { paddingBottom: 28 },
+  group: { marginTop: 22, marginHorizontal: 16 },
+  groupLabel: { marginBottom: 2, marginLeft: 4, fontSize: 12, fontWeight: '600', color: '#A3A4A8', letterSpacing: 0.2 },
+  histItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 4, paddingVertical: 14 },
+  histDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#ECEDF0' },
+  histItemPressed: { opacity: 0.55 },
+  histDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'transparent' },
+  histDotOn: { backgroundColor: '#141518' },
+  histTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  histTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1B1C1E', letterSpacing: -0.25 },
+  histWhen: { fontSize: 12, color: '#AEAFB3' },
+  histSub: { fontSize: 13, color: '#9A9B9F', marginTop: 3 },
+  histDelete: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  noResults: { marginTop: 56, alignItems: 'center', gap: 8 },
   noResultsText: { color: '#9A9B9F', fontSize: 13 },
-  newChat: { marginTop: 8, height: 48, borderRadius: 24, backgroundColor: '#141518', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  newChatText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14.5, letterSpacing: -0.2 },
   toast: { position: 'absolute', alignSelf: 'center', bottom: 120, backgroundColor: '#141518', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 18 },
   toastText: { color: '#FFFFFF', fontSize: 12.5, fontWeight: '600' },
 });
