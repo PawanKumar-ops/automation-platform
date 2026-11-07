@@ -8,6 +8,7 @@
     "@iconify-json/lucide": "^1.2.150",
     "@iconify-json/simple-icons": "^1.2.101",
     "expo": "~58.0.22",
+    "expo-blur": "~58.0.5",
     "expo-constants": "~58.0.14",
     "expo-device": "~58.0.5",
     "expo-font": "~58.0.11",

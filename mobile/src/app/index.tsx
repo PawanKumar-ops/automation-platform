@@ -1,5 +1,5 @@
-import { WorkflowCanvas } from '@/components/workflow-canvas';
+import { Dashboard } from '@/components/dashboard';
 
 export default function HomeScreen() {
-  return <WorkflowCanvas />;
+  return <Dashboard />;
 }
