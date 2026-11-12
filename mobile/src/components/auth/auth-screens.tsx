@@ -1,6 +1,6 @@
 import { IconifyIcon } from '@/components/iconify-icon';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { ComponentRef, ReactNode, useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -15,6 +15,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '@/auth/auth-context';
+import { authApi } from '@/auth/auth-api';
 
 const ACCENT = '#FFFFFF';
 const INK = '#1D1D1F';
@@ -136,6 +138,27 @@ function PrimaryButton({ label, onPress }: { label: string; onPress: () => void 
   );
 }
 
+function FormFeedback({ message, error }: { message: string; error?: boolean }) {
+  return message ? <Text accessibilityLiveRegion="polite" style={{ color: error ? '#F87171' : '#A3E6B0', fontSize: 13, lineHeight: 18, marginTop: 10 }}>{message}</Text> : null;
+}
+
+function useAction() {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState(false);
+  const setNotice = (notice: string) => { setError(false); setMessage(notice); };
+  const run = async (action: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true); setMessage(''); setError(false);
+    try { await action(); } catch (caught) {
+      setError(true);
+      setMessage(caught instanceof Error ? caught.message : 'Something went wrong. Please try again.');
+    }
+    finally { setBusy(false); }
+  };
+  return { busy, message, error, run, setNotice };
+}
+
 function OutlineButton({ icon, label, onPress }: { icon: ReactNode; label: string; onPress?: () => void }) {
   return (
     <Pressable
@@ -183,22 +206,28 @@ function SocialRow() {
 
 export function SignInScreen() {
   const [emailMode, setEmailMode] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const { acceptTokens } = useAuth();
+  const action = useAction();
+  const signIn = () => action.run(async () => { const tokens = await authApi.signin({ email: email.trim(), password }); await acceptTokens(tokens); router.replace('/dashboard'); });
 
   if (emailMode) {
     return (
       <AuthFrame
         footer={
           <>
-            <PrimaryButton label="Log In" onPress={() => router.replace('/dashboard')} />
+            <PrimaryButton label={action.busy ? 'Logging in…' : 'Log In'} onPress={signIn} />
             <AuthSwitch label="New to Taskvyn?" link="Sign Up" onPress={() => router.replace('/sign-up')} />
+            <FormFeedback error={action.error} message={action.message} />
           </>
         }
         onBack={() => setEmailMode(false)}
         subtitle="Welcome back. Enter your details to continue."
         title="Log in with email">
         <View style={styles.form}>
-          <Field autoComplete="email" icon="lucide:mail" keyboardType="email-address" label="Email" placeholder="you@example.com" />
-          <Field autoComplete="current-password" icon="lucide:lock-keyhole" label="Password" password placeholder="Enter your password" />
+          <Field autoComplete="email" icon="lucide:mail" keyboardType="email-address" label="Email" onChangeText={setEmail} placeholder="you@example.com" value={email} />
+          <Field autoComplete="current-password" icon="lucide:lock-keyhole" label="Password" onChangeText={setPassword} password placeholder="Enter your password" value={password} />
           <Pressable accessibilityRole="link" onPress={() => router.push('/forgot-password')} style={styles.forgotLink}>
             <Text style={styles.forgotText}>Forgot password?</Text>
           </Pressable>
@@ -245,19 +274,28 @@ function SignInMethods({ onEmail }: { onEmail: () => void }) {
 }
 
 export function SignUpScreen() {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const action = useAction();
+  const createAccount = () => action.run(async () => {
+    const result = await authApi.signup({ name: name.trim(), email: email.trim(), password });
+    router.push({ pathname: '/verify-email', params: { email: result.email, flow: 'signup', notice: result.message } });
+  });
   return (
     <AuthFrame
       footer={
         <>
-          <PrimaryButton label="Create Account" onPress={() => router.push('/verify-email')} />
+          <PrimaryButton label={action.busy ? 'Creating account…' : 'Create Account'} onPress={createAccount} />
           <AuthSwitch label="Already have an account?" link="Log In" onPress={() => router.replace('/sign-in')} />
+          <FormFeedback error={action.error} message={action.message} />
         </>
       }
       subtitle="Start building automations in minutes." title="Create your account">
       <View style={styles.form}>
-        <Field autoCapitalize="words" autoComplete="name" icon="lucide:user" label="Full name" placeholder="Jane Cooper" />
-        <Field autoComplete="email" icon="lucide:mail" keyboardType="email-address" label="Email" placeholder="you@example.com" />
-        <Field autoComplete="new-password" icon="lucide:lock-keyhole" label="Password" password placeholder="Create a password" />
+        <Field autoCapitalize="words" autoComplete="name" icon="lucide:user" label="Full name" onChangeText={setName} placeholder="Jane Cooper" value={name} />
+        <Field autoComplete="email" icon="lucide:mail" keyboardType="email-address" label="Email" onChangeText={setEmail} placeholder="you@example.com" value={email} />
+        <Field autoComplete="new-password" icon="lucide:lock-keyhole" label="Password" onChangeText={setPassword} password placeholder="Create a password" value={password} />
         <Text style={styles.helper}>At least 8 characters, including a number and a symbol.</Text>
       </View>
       <Divider label="or sign up with" />
@@ -267,26 +305,51 @@ export function SignUpScreen() {
 }
 
 export function ForgotPasswordScreen() {
+  const [email, setEmail] = useState('');
+  const action = useAction();
+  const requestCode = () => action.run(async () => {
+    await authApi.forgotPassword(email.trim());
+    router.push({ pathname: '/verify-email', params: { email: email.trim(), flow: 'reset' } });
+  });
   return (
     <AuthFrame
       footer={
         <>
-          <PrimaryButton label="Send Code" onPress={() => router.push('/verify-email')} />
+          <PrimaryButton label={action.busy ? 'Sending…' : 'Send Code'} onPress={requestCode} />
           <Pressable accessibilityRole="link" onPress={() => router.replace('/sign-in')} style={styles.centerLink}>
             <IconifyIcon color="#FFFFFF" name="lucide:arrow-left" size={14} />
             <Text style={styles.centerLinkText}>Back to Log In</Text>
           </Pressable>
+          <FormFeedback error={action.error} message={action.message} />
         </>
       }
       subtitle="Enter your email and we'll send you a 6-digit code to reset your password." title="Forgot password?">
-      <Field autoComplete="email" icon="lucide:mail" keyboardType="email-address" label="Email" placeholder="you@example.com" />
+      <Field autoComplete="email" icon="lucide:mail" keyboardType="email-address" label="Email" onChangeText={setEmail} placeholder="you@example.com" value={email} />
     </AuthFrame>
   );
 }
 export function VerifyEmailScreen() {
+  const params = useLocalSearchParams<{ email?: string; flow?: string; notice?: string }>();
+  const email = Array.isArray(params.email) ? params.email[0] : params.email ?? '';
+  const flow = Array.isArray(params.flow) ? params.flow[0] : params.flow ?? 'signup';
+  const notice = Array.isArray(params.notice) ? params.notice[0] : params.notice;
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const refs = useRef<(ComponentRef<typeof TextInput> | null)[]>([]);
+
+  const { acceptTokens } = useAuth();
+  const action = useAction();
+  const verify = () => action.run(async () => {
+    const code = digits.join('');
+    if (code.length !== 6) throw new Error('Enter the 6-digit code.');
+    if (flow === 'reset') { router.push({ pathname: '/reset-password', params: { email, code } }); return; }
+    await acceptTokens(await authApi.verifyEmail({ email, code }));
+    router.replace('/dashboard');
+  });
+  const resend = () => action.run(async () => {
+    const result = await authApi.resendOtp({ email, purpose: flow === 'reset' ? 'password-reset' : 'verification' });
+    action.setNotice(result.message);
+  });
 
   const updateDigit = (value: string, index: number) => {
     const next = value.replace(/\D/g, '').slice(-1);
@@ -298,11 +361,13 @@ export function VerifyEmailScreen() {
     <AuthFrame
       footer={
         <>
-          <PrimaryButton label="Verify Email" onPress={() => router.push('/reset-password')} />
-          <AuthSwitch label="Didn’t receive the code?" link="Resend" onPress={() => {}} />
+          <PrimaryButton label={action.busy ? 'Please wait…' : flow === 'reset' ? 'Continue' : 'Verify Email'} onPress={verify} />
+          <AuthSwitch label="Didn’t receive the code?" link="Resend" onPress={resend} />
+          {notice ? <FormFeedback message={notice} /> : null}
+          <FormFeedback error={action.error} message={action.message} />
         </>
       }
-      subtitle="We sent a 6-digit code to your email. Enter it below to continue." title="Verify your email">
+      subtitle={`We sent a 6-digit code to ${email || 'your email'}. Enter it below to continue.`} title={flow === 'reset' ? 'Reset your password' : 'Verify your email'}>
       <View style={styles.otpRow}>
         {digits.map((digit, index) => (
           <TextInput
@@ -330,13 +395,24 @@ export function VerifyEmailScreen() {
 }
 
 export function ResetPasswordScreen() {
+  const params = useLocalSearchParams<{ email?: string; code?: string }>();
+  const email = Array.isArray(params.email) ? params.email[0] : params.email ?? '';
+  const code = Array.isArray(params.code) ? params.code[0] : params.code ?? '';
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const action = useAction();
+  const reset = () => action.run(async () => {
+    if (password !== confirmation) throw new Error('Passwords do not match.');
+    await authApi.resetPassword({ email, code, password });
+    router.replace('/sign-in');
+  });
   return (
     <AuthFrame
-      footer={<PrimaryButton label="Reset Password" onPress={() => router.replace('/sign-in')} />}
+      footer={<><PrimaryButton label={action.busy ? 'Updating…' : 'Reset Password'} onPress={reset} /><FormFeedback error={action.error} message={action.message} /></>}
       subtitle="Your new password must be different from ones you've used before." title="Set a new password">
       <View style={styles.form}>
-        <Field autoComplete="new-password" icon="lucide:lock-keyhole" label="New password" password placeholder="Enter new password" />
-        <Field autoComplete="new-password" icon="lucide:shield-check" label="Confirm password" password placeholder="Re-enter new password" />
+        <Field autoComplete="new-password" icon="lucide:lock-keyhole" label="New password" onChangeText={setPassword} password placeholder="Enter new password" value={password} />
+        <Field autoComplete="new-password" icon="lucide:shield-check" label="Confirm password" onChangeText={setConfirmation} password placeholder="Re-enter new password" value={confirmation} />
         <Text style={styles.helper}>At least 8 characters, including a number and a symbol.</Text>
       </View>
     </AuthFrame>

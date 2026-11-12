@@ -17,6 +17,7 @@ import { BOTTOM_NAV_SPACE, BottomNav } from '@/components/bottom-nav';
 import { FEATURE_COLORS, FeatureKind, FeatureMark } from '@/components/feature-mark';
 import { IconifyIcon } from '@/components/iconify-icon';
 import { Fonts } from '@/constants/theme';
+import { useAuth } from '@/auth/auth-context';
 
 const HERO_ASPECT = 1200 / 934;
 const HEADER_HEIGHT = 56;
@@ -281,6 +282,7 @@ function WorkflowRow({
 }
 
 export function Dashboard() {
+    const { user, signOut } = useAuth();
     const insets = useSafeAreaInsets();
     const window = useWindowDimensions();
     // Static web rendering has no real window size; use a phone width until hydrated.
@@ -350,10 +352,11 @@ export function Dashboard() {
                                 <AiMark animated={false} size={34} />
                             </Pressable>
                             <Pressable
-                                accessibilityLabel="Open profile"
+                                accessibilityLabel="Sign out"
                                 accessibilityRole="button"
+                                onPress={() => void signOut()}
                                 style={({ pressed }) => [styles.avatar, pressed && styles.pressed]}>
-                                <Text style={styles.avatarText}>AK</Text>
+                                <Text style={styles.avatarText}>{user?.name?.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'U'}</Text>
                             </Pressable>
                         </View>
                     </View>
