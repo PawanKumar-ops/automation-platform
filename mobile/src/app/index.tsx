@@ -1,5 +1,5 @@
-import { Dashboard } from '@/components/dashboard';
+import { AuthLanding } from '@/components/auth/auth-landing';
 
 export default function HomeScreen() {
-  return <Dashboard />;
+  return <AuthLanding />;
 }
