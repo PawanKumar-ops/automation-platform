@@ -63,7 +63,7 @@ export class WorkflowsService {
       ...(dto.pollIntervalSeconds ? { pollIntervalSeconds: dto.pollIntervalSeconds } : {}),
       revision: workflow.revision + 1,
       // A different trigger watches a different source: start fresh without replaying history.
-      ...(triggerChanged ? { triggerState: { initialized: false, seenIds: [], consecutiveFailures: 0 } } : {}),
+      ...(triggerChanged ? { triggerState: { initialized: false, seenIds: [], consecutiveFailures: 0, ...(workflow.status === 'active' ? { activationAt: new Date() } : {}) } } : {}),
     });
     await workflow.save();
     if (workflow.status === 'active') {
@@ -81,14 +81,14 @@ export class WorkflowsService {
     return { id: workflow.id as string, deleted: true };
   }
 
-  /** Turns the workflow on. Existing items are recorded on the first poll and not replayed. */
+  /** Turns the workflow on. Only events after this activation boundary can start runs. */
   async activate(userId: string, id: string) {
     const workflow = await this.findOwned(userId, id);
     await this.validateForActivation(userId, workflow.trigger, workflow.steps);
     workflow.set({
       status: 'active',
       statusReason: undefined,
-      triggerState: { initialized: false, seenIds: [], consecutiveFailures: 0 },
+      triggerState: { initialized: false, seenIds: [], consecutiveFailures: 0, activationAt: new Date() },
     });
     await workflow.save();
     await this.scheduler.schedule({ id: workflow.id as string, pollIntervalSeconds: workflow.pollIntervalSeconds });

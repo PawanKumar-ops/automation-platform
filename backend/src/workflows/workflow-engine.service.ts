@@ -67,11 +67,22 @@ export class WorkflowEngine {
     }
 
     try {
+      // Backfill active workflows created before activationAt existed. Taking the
+      // boundary before polling makes a failed first attempt safe to retry.
+      const activationAt = workflow.triggerState.activationAt ?? now;
+      if (!workflow.triggerState.activationAt) {
+        await this.workflows.updateOne({ _id: workflow._id, 'triggerState.activationAt': { $exists: false } }, {
+          $set: { 'triggerState.activationAt': activationAt },
+        }).exec();
+        workflow.triggerState.activationAt = activationAt;
+      }
       const seeding = !workflow.triggerState.initialized;
       const seen = new Set(workflow.triggerState.seenIds);
+      const triggerRef = toStepRef(workflow.trigger);
+      const pollInput = withActivationBoundary(triggerRef, activationAt);
       const items = await this.runner.poll(
         workflow.userId.toString(),
-        toStepRef(workflow.trigger),
+        pollInput,
         seeding ? () => true : (id) => seen.has(id),
       );
       // Oldest first, so actions observe events in the order they happened.
@@ -215,4 +226,15 @@ export class WorkflowEngine {
 
 function isDuplicateKey(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: number }).code === 11000;
+}
+
+/** Gmail supports after: searches, so enforce activation time even if initial seeding fails. */
+function withActivationBoundary(step: StepRef, activationAt?: Date): StepRef {
+  if (!activationAt || step.app !== 'gmail' || step.operation !== 'new_email') return step;
+  // Gmail's `after:` boundary has whole-second precision. Rounding up avoids
+  // treating messages in the activation second as new.
+  const afterSeconds = Math.ceil(activationAt.getTime() / 1000);
+  const input = step.input ?? {};
+  const query = String(input.query ?? '').trim();
+  return { ...step, input: { ...input, query: [query, `after:${afterSeconds}`].filter(Boolean).join(' ') } };
 }

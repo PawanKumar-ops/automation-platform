@@ -58,3 +58,44 @@ describe('WorkflowEngine.executeRun', () => {
     expect(update.$set).toBeDefined();
   });
 });
+
+describe('WorkflowEngine.pollWorkflow activation boundary', () => {
+  it('persists the activation boundary before a poll so a failed seed cannot replay older email', async () => {
+    const workflowId = new Types.ObjectId();
+    const activationAt = new Date('2026-11-27T10:00:00.250Z');
+    const workflow = {
+      _id: workflowId,
+      id: workflowId.toString(),
+      userId: new Types.ObjectId(),
+      status: 'active',
+      trigger: { app: 'gmail', operation: 'new_email', input: { query: 'from:boss@example.com' } },
+      triggerState: { initialized: false, seenIds: [], consecutiveFailures: 0 },
+    };
+    const exec = <T>(value: T) => ({ exec: jest.fn().mockResolvedValue(value), select: jest.fn().mockReturnThis(), limit: jest.fn().mockReturnThis() });
+    const workflows = {
+      findOneAndUpdate: jest.fn(() => exec(workflow)),
+      updateOne: jest.fn(() => exec({})),
+      findById: jest.fn(() => ({ select: jest.fn().mockReturnThis(), exec: jest.fn().mockResolvedValue(workflow) })),
+    };
+    const runner = { poll: jest.fn().mockRejectedValue(new Error('temporary Gmail outage')) };
+    const scheduler = { unschedule: jest.fn() };
+    const engine = new WorkflowEngine(workflows as never, { create: jest.fn() } as never, { add: jest.fn() } as never, runner as never, scheduler as never);
+
+    jest.useFakeTimers().setSystemTime(activationAt);
+    try {
+      await engine.pollWorkflow(workflowId.toString());
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(workflows.updateOne).toHaveBeenCalledWith(
+      { _id: workflowId, 'triggerState.activationAt': { $exists: false } },
+      { $set: { 'triggerState.activationAt': activationAt } },
+    );
+    expect(workflow.triggerState.activationAt).toEqual(activationAt);
+    expect(runner.poll).toHaveBeenCalledWith(workflow.userId.toString(), expect.objectContaining({
+      input: { query: 'from:boss@example.com after:1795773601' },
+    }), expect.any(Function));
+    expect(scheduler.unschedule).not.toHaveBeenCalled();
+  });
+});

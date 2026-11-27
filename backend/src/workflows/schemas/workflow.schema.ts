@@ -30,6 +30,10 @@ export class TriggerState {
   @Prop({ default: false })
   initialized!: boolean;
 
+  /** Events older than this activation boundary must never start a run. */
+  @Prop()
+  activationAt?: Date;
+
   /** Most recent item ids already handled (newest first, capped). */
   @Prop({ type: [String], default: [] })
   seenIds!: string[];

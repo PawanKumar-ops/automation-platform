@@ -1261,13 +1261,13 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
 
           <View style={[styles.zoomBar, styles.zoomBarRest, { top: header.bottom }]}>
             <Pressable accessibilityLabel="Zoom in" onPress={() => zoomBy(1.25)} style={styles.zoomBtn}>
-              <IconifyIcon color="#1B1C1E" name="lucide:zoom-in" size={16} />
+              <IconifyIcon color="#1B1C1E" name="lucide:zoom-in" size={19} />
             </Pressable>
             <Pressable accessibilityLabel="Zoom out" onPress={() => zoomBy(0.8)} style={styles.zoomBtn}>
-              <IconifyIcon color="#1B1C1E" name="lucide:zoom-out" size={16} />
+              <IconifyIcon color="#1B1C1E" name="lucide:zoom-out" size={19} />
             </Pressable>
             <Pressable accessibilityLabel="Fit to screen" onPress={() => fit()} style={styles.zoomBtn}>
-              <IconifyIcon color="#1B1C1E" name="lucide:maximize" size={15} />
+              <IconifyIcon color="#1B1C1E" name="lucide:maximize" size={18} />
             </Pressable>
           </View>
 
@@ -1612,8 +1612,7 @@ const styles = StyleSheet.create({
   zoomBar: {
     position: 'absolute',
     right: 14,
-    borderRadius: 24,
-    overflow: 'hidden',
+    gap: 8,
   },
   emptyWrap: {
     ...StyleSheet.absoluteFill,
@@ -1672,17 +1671,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   emptyCtaText: { fontSize: 13.5, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 },
-  zoomBarRest: {
-    paddingVertical: 5,
-    backgroundColor: 'rgba(255,255,255,0.98)',
-    borderWidth: 1,
-    borderColor: '#EAEAE7',
-    borderRadius: 24,
-    ...shadow,
-  },
+  zoomBarRest: {},
   zoomBtn: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F5F5F3',
     alignItems: 'center',
     justifyContent: 'center',
   },
