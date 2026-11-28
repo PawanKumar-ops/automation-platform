@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Platform,
     Pressable,
@@ -10,7 +10,7 @@ import {
     View,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AiMark } from '@/components/ai-mark';
@@ -19,6 +19,7 @@ import { FEATURE_COLORS, FeatureKind, FeatureMark } from '@/components/feature-m
 import { IconifyIcon } from '@/components/iconify-icon';
 import { Fonts } from '@/constants/theme';
 import { useAuth } from '@/auth/auth-context';
+import { Workflow, workflowsApi } from '@/auth/auth-api';
 
 const HERO_ASPECT = 1200 / 934;
 const HEADER_HEIGHT = 56;
@@ -86,6 +87,44 @@ const TEMPLATES: Template[] = [
         used: '3841',
     },
 ];
+
+type WorkflowItem = {
+    id?: string;
+    name: string;
+    meta: string;
+    icons: IconName[];
+    state: 'Draft' | 'Active';
+    progress?: number;
+    runs?: string;
+};
+
+function editedAgo(iso: string) {
+    const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
+    if (minutes < 1) return 'Edited just now';
+    if (minutes < 60) return `Edited ${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `Edited ${hours} hr ago`;
+    const days = Math.round(hours / 24);
+    return days === 1 ? 'Edited yesterday' : `Edited ${days} days ago`;
+}
+
+/** First two distinct apps along the flow, starting from the trigger. */
+function topApps(workflow: Workflow): IconName[] {
+    const nodes = (workflow.canvas?.nodes ?? []) as { key: string; parent: string | null; icon?: IconName }[];
+    const ordered: typeof nodes = [];
+    const queue = nodes.filter((n) => !n.parent);
+    while (queue.length) {
+        const node = queue.shift()!;
+        ordered.push(node);
+        queue.push(...nodes.filter((n) => n.parent === node.key));
+    }
+    const icons = [...new Set(ordered.map((n) => n.icon).filter((icon): icon is IconName => Boolean(icon)))];
+    return icons.length ? icons.slice(0, 2) : ['lucide:workflow'];
+}
+
+function toDraftItem(workflow: Workflow): WorkflowItem {
+    return { id: workflow.id, name: workflow.name, meta: editedAgo(workflow.updatedAt), icons: topApps(workflow), state: 'Draft' };
+}
 
 const WORKFLOWS: {
     name: string;
@@ -244,7 +283,7 @@ function WorkflowRow({
     last,
     onOpen,
 }: {
-    workflow: (typeof WORKFLOWS)[number];
+    workflow: WorkflowItem;
     last?: boolean;
     onOpen: (name: string) => void;
 }) {
@@ -302,12 +341,29 @@ export function Dashboard() {
     // Render at the photo's aspect ratio and shift up so only the top is clipped and the fade stays intact.
     const heroRenderHeight = Math.max(width / HERO_ASPECT, heroImageHeight);
 
+    // The user's saved drafts, refreshed whenever the dashboard comes back into view.
+    const [drafts, setDrafts] = useState<WorkflowItem[]>([]);
+    useFocusEffect(
+        useCallback(() => {
+            let alive = true;
+            workflowsApi
+                .list()
+                .then((list) => {
+                    if (alive) setDrafts(list.filter((w) => w.status === 'draft').map(toDraftItem));
+                })
+                .catch(() => undefined);
+            return () => {
+                alive = false;
+            };
+        }, [])
+    );
+
     const groupedWorkflows = useMemo(
         () => ({
-            drafts: WORKFLOWS.filter((workflow) => workflow.state === 'Draft'),
+            drafts,
             active: WORKFLOWS.filter((workflow) => workflow.state === 'Active'),
         }),
-        []
+        [drafts]
     );
 
     const submitPrompt = () => {
@@ -479,14 +535,17 @@ export function Dashboard() {
                             <View style={styles.workflowColumn}>
                                 <SectionHeading action="View all" title="Drafts" />
                                 <View style={styles.workflowList}>
-                                    {groupedWorkflows.drafts.map((workflow, index, list) => (
+                                    {groupedWorkflows.drafts.slice(0, 4).map((workflow, index, list) => (
                                         <WorkflowRow
-                                            key={workflow.name}
+                                            key={workflow.id ?? workflow.name}
                                             last={index === list.length - 1}
-                                            onOpen={(name) => setNotice(`Opening ${name}`)}
+                                            onOpen={() => router.push({ pathname: '/canvas', params: { workflowId: workflow.id! } })}
                                             workflow={workflow}
                                         />
                                     ))}
+                                    {!groupedWorkflows.drafts.length ? (
+                                        <Text style={styles.workflowMeta}>No drafts yet. Workflows you save appear here.</Text>
+                                    ) : null}
                                 </View>
                             </View>
                             <View style={styles.workflowColumn}>

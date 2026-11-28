@@ -36,13 +36,16 @@ export class WorkflowsService {
   }
 
   async create(userId: string, dto: CreateWorkflowDto) {
-    this.validateStructure(dto.trigger, dto.steps);
+    const steps = (dto.steps ?? []).map(toStep);
+    const trigger = dto.trigger ? toStep(dto.trigger) : undefined;
+    if (trigger) this.validateStructure(trigger, steps);
     const workflow = await this.workflows.create({
       userId: new Types.ObjectId(userId),
       name: dto.name.trim(),
       status: 'draft',
-      trigger: toStep(dto.trigger),
-      steps: dto.steps.map(toStep),
+      ...(trigger ? { trigger } : {}),
+      steps: trigger ? steps : [],
+      ...(dto.canvas ? { canvas: dto.canvas } : {}),
       pollIntervalSeconds: dto.pollIntervalSeconds ?? 120,
     });
     return present(workflow);
@@ -50,16 +53,19 @@ export class WorkflowsService {
 
   async update(userId: string, id: string, dto: UpdateWorkflowDto) {
     const workflow = await this.findOwned(userId, id);
-    const trigger = dto.trigger ? toStep(dto.trigger) : workflow.trigger;
-    const steps = dto.steps ? dto.steps.map(toStep) : workflow.steps;
-    this.validateStructure(trigger, steps);
-    if (workflow.status === 'active') await this.validateForActivation(userId, trigger, steps);
+    const trigger = dto.trigger === null ? undefined : dto.trigger ? toStep(dto.trigger) : workflow.trigger;
+    const steps = trigger ? (dto.steps ? dto.steps.map(toStep) : workflow.steps) : [];
+    if (!trigger && workflow.status === 'active') throw new BadRequestException('Pause this workflow before removing its trigger');
+    if (trigger) this.validateStructure(trigger, steps);
+    if (trigger && workflow.status === 'active') await this.validateForActivation(userId, trigger, steps);
 
-    const triggerChanged = dto.trigger && JSON.stringify(toComparable(workflow.trigger)) !== JSON.stringify(toComparable(trigger));
+    const triggerChanged = dto.trigger !== undefined &&
+      JSON.stringify(workflow.trigger ? toComparable(workflow.trigger) : null) !== JSON.stringify(trigger ? toComparable(trigger) : null);
     workflow.set({
       ...(dto.name ? { name: dto.name.trim() } : {}),
       trigger,
       steps,
+      ...(dto.canvas ? { canvas: dto.canvas } : {}),
       ...(dto.pollIntervalSeconds ? { pollIntervalSeconds: dto.pollIntervalSeconds } : {}),
       revision: workflow.revision + 1,
       // A different trigger watches a different source: start fresh without replaying history.
@@ -84,7 +90,7 @@ export class WorkflowsService {
   /** Turns the workflow on. Only events after this activation boundary can start runs. */
   async activate(userId: string, id: string) {
     const workflow = await this.findOwned(userId, id);
-    await this.validateForActivation(userId, workflow.trigger, workflow.steps);
+    await this.validateForActivation(userId, requireTrigger(workflow), workflow.steps);
     workflow.set({
       status: 'active',
       statusReason: undefined,
@@ -107,8 +113,9 @@ export class WorkflowsService {
   /** Runs the actions once with the most recent real trigger item (like Zapier's "Test"). */
   async runNow(userId: string, id: string) {
     const workflow = await this.findOwned(userId, id);
-    await this.validateForActivation(userId, workflow.trigger, workflow.steps);
-    const items = await interactive(() => this.runner.poll(userId, toStepRef(workflow.trigger)));
+    const trigger = requireTrigger(workflow);
+    await this.validateForActivation(userId, trigger, workflow.steps);
+    const items = await interactive(() => this.runner.poll(userId, toStepRef(trigger)));
     const latest = items[0];
     if (!latest) throw new UnprocessableEntityException('No trigger data found yet. Create a matching event in the app and try again.');
     const run = await this.engine.createRun(workflow, { id: `manual:${randomUUID()}`, data: latest.data }, true);
@@ -191,6 +198,11 @@ export class WorkflowsService {
   }
 }
 
+function requireTrigger(workflow: WorkflowDocument): WorkflowStep {
+  if (!workflow.trigger) throw new BadRequestException({ message: ['Choose a trigger to start this workflow'], code: 'INVALID_WORKFLOW' });
+  return workflow.trigger;
+}
+
 function toStep(dto: WorkflowStepDto | WorkflowStep): WorkflowStep {
   return {
     id: dto.id,
@@ -216,11 +228,12 @@ function present(workflow: WorkflowDocument) {
     name: workflow.name,
     status: workflow.status,
     statusReason: workflow.statusReason ?? null,
-    trigger: presentStep(workflow.trigger),
+    trigger: workflow.trigger ? presentStep(workflow.trigger) : null,
     steps: workflow.steps.map(presentStep),
     pollIntervalSeconds: workflow.pollIntervalSeconds,
     revision: workflow.revision,
     lastRunAt: workflow.lastRunAt ?? null,
+    canvas: workflow.canvas ?? null,
     triggerState: {
       initialized: state?.initialized ?? false,
       lastPolledAt: state?.lastPolledAt ?? null,

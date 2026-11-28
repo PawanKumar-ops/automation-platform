@@ -78,6 +78,8 @@ export class WorkflowEngine {
       }
       const seeding = !workflow.triggerState.initialized;
       const seen = new Set(workflow.triggerState.seenIds);
+      // Activation requires a trigger, so this only guards legacy or corrupted documents.
+      if (!workflow.trigger) throw new Error('Workflow has no trigger');
       const triggerRef = toStepRef(workflow.trigger);
       const pollInput = withActivationBoundary(triggerRef, activationAt);
       const items = await this.runner.poll(

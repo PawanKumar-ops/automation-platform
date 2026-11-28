@@ -196,14 +196,20 @@ export const integrationsApi = {
 export type WorkflowStepConfig = { id: string; app: string; operation: string; connectionId?: string | null; input: Record<string, unknown> };
 export type Workflow = {
   id: string; name: string; status: 'draft' | 'active' | 'paused' | 'error'; statusReason: string | null;
-  trigger: WorkflowStepConfig; steps: WorkflowStepConfig[]; pollIntervalSeconds: number; lastRunAt: string | null;
+  trigger: WorkflowStepConfig | null; steps: WorkflowStepConfig[]; pollIntervalSeconds: number; lastRunAt: string | null;
+  /** Saved editor layout; `nodes` are canvas cards, `steps` per-card settings. */
+  canvas: { nodes?: unknown[]; steps?: Record<string, unknown> } | null;
+  createdAt: string; updatedAt: string;
   triggerState: { initialized: boolean; lastPolledAt: string | null; lastError: string | null; consecutiveFailures: number };
 };
 export type WorkflowRun = {
   id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; manual: boolean; error: string | null; createdAt: string;
   steps: { stepId: string; app: string; operation: string; status: string; error?: string }[];
 };
-type WorkflowBody = { name: string; trigger: WorkflowStepConfig; steps: WorkflowStepConfig[]; pollIntervalSeconds?: number };
+type WorkflowBody = {
+  name: string; trigger: WorkflowStepConfig | null; steps: WorkflowStepConfig[]; pollIntervalSeconds?: number;
+  canvas?: { nodes: unknown[]; steps: Record<string, unknown> };
+};
 
 const clean = (step: WorkflowStepConfig): WorkflowStepConfig => ({
   id: step.id, app: step.app, operation: step.operation, input: step.input, ...(step.connectionId ? { connectionId: step.connectionId } : {}),
@@ -211,10 +217,12 @@ const clean = (step: WorkflowStepConfig): WorkflowStepConfig => ({
 
 export const workflowsApi = {
   list: () => api<Workflow[]>('/workflows', {}, true),
-  create: (body: WorkflowBody) => api<Workflow>('/workflows', { method: 'POST', body: JSON.stringify({ ...body, trigger: clean(body.trigger), steps: body.steps.map(clean) }) }, true),
+  get: (id: string) => api<Workflow>(`/workflows/${encodeURIComponent(id)}`, {}, true),
+  create: (body: WorkflowBody) => api<Workflow>('/workflows', { method: 'POST', body: JSON.stringify({ ...body, trigger: body.trigger ? clean(body.trigger) : null, steps: body.steps.map(clean) }) }, true),
   update: (id: string, body: Partial<WorkflowBody>) => api<Workflow>(`/workflows/${id}`, {
     method: 'PATCH', body: JSON.stringify({ ...body, ...(body.trigger ? { trigger: clean(body.trigger) } : {}), ...(body.steps ? { steps: body.steps.map(clean) } : {}) }),
   }, true),
+  remove: (id: string) => api<{ id: string; deleted: true }>(`/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' }, true),
   activate: (id: string) => api<Workflow>(`/workflows/${id}/activate`, { method: 'POST' }, true),
   pause: (id: string) => api<Workflow>(`/workflows/${id}/pause`, { method: 'POST' }, true),
   runNow: (id: string) => api<WorkflowRun>(`/workflows/${id}/run`, { method: 'POST' }, true),

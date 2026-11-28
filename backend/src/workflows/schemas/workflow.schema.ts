@@ -75,8 +75,9 @@ export class Workflow {
   @Prop({ maxlength: 1000 })
   statusReason?: string;
 
-  @Prop({ type: WorkflowStepSchema, required: true })
-  trigger!: WorkflowStep;
+  /** Missing while a draft's trigger is not set up yet. Required to activate or run. */
+  @Prop({ type: WorkflowStepSchema })
+  trigger?: WorkflowStep;
 
   /** Actions, executed in this order. */
   @Prop({ type: [WorkflowStepSchema], default: [] })
@@ -94,6 +95,10 @@ export class Workflow {
   /** Incremented on every definition change; runs record the version they used. */
   @Prop({ default: 1 })
   revision!: number;
+
+  /** Editor layout (cards, links and per-step drafts) so drafts reopen exactly as left. */
+  @Prop({ type: MongooseSchema.Types.Mixed })
+  canvas?: Record<string, unknown>;
 }
 
 export const WorkflowSchema = SchemaFactory.createForClass(Workflow);

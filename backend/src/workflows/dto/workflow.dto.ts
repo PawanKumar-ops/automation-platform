@@ -31,15 +31,22 @@ export class CreateWorkflowDto {
   @MaxLength(120)
   name!: string;
 
+  /** Omitted (or null) for a draft whose trigger is not set up yet. */
+  @IsOptional()
   @ValidateNested()
   @Type(() => WorkflowStepDto)
-  trigger!: WorkflowStepDto;
+  trigger?: WorkflowStepDto | null;
 
+  @IsOptional()
+  @IsObject()
+  canvas?: Record<string, unknown>;
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(25)
   @ValidateNested({ each: true })
   @Type(() => WorkflowStepDto)
-  steps!: WorkflowStepDto[];
+  steps?: WorkflowStepDto[];
 
   @IsOptional()
   @IsInt()
@@ -55,10 +62,15 @@ export class UpdateWorkflowDto {
   @MaxLength(120)
   name?: string;
 
+  /** `null` clears the definition while a draft is incomplete. */
   @IsOptional()
   @ValidateNested()
   @Type(() => WorkflowStepDto)
-  trigger?: WorkflowStepDto;
+  trigger?: WorkflowStepDto | null;
+
+  @IsOptional()
+  @IsObject()
+  canvas?: Record<string, unknown>;
 
   @IsOptional()
   @IsArray()

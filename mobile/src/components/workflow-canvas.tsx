@@ -16,6 +16,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Path, Pattern, Rect, Stop } from 'react-native-svg';
@@ -23,7 +24,7 @@ import Svg, { Circle, Defs, LinearGradient, Path, Pattern, Rect, Stop } from 're
 import { AiChatDrawer } from '@/components/ai-chat-drawer';
 import { AiMark } from '@/components/ai-mark';
 import { IconifyIcon } from '@/components/iconify-icon';
-import { Workflow, workflowsApi, WorkflowStepConfig } from '@/auth/auth-api';
+import { ApiError, Workflow, workflowsApi, WorkflowStepConfig } from '@/auth/auth-api';
 import { MappingSource, StepConfigDrawer, StepDraft } from '@/components/automation/step-config-drawer';
 
 const NODE_W = 96;
@@ -36,6 +37,7 @@ const MAX_SCALE = 2.2;
 const FIT_MIN_SCALE = 0.75;
 const NATIVE = Platform.OS !== 'web';
 const TRASH = '__trash__';
+const TOOLBAR_W = 56 * 4 + 64 + 8 * 4 + 8; // four tool buttons, the AI button, gaps and padding
 const SLOT_DY = ROW; // "add after" slot sits one row below an end card
 
 /** Apply a drop: `n:` swap places, `e:` insert on a connector, `a:` append under an end card. */
@@ -434,7 +436,87 @@ function Drawer({
   );
 }
 
-export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConnection?: boolean } = {}) {
+type MenuItem = { key: string; label: string; icon: `${string}:${string}`; danger?: boolean; onPress: () => void };
+
+/** Floating, frosted context menu that grows out of the toolbar's "more" button. */
+function ContextMenu({ items, onClose, right, bottom }: { items: MenuItem[]; onClose: () => void; right: number; bottom: number }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(anim, { toValue: 1, damping: 20, stiffness: 320, mass: 0.7, useNativeDriver: NATIVE }).start();
+  }, [anim]);
+  const close = (then?: () => void) =>
+    Animated.timing(anim, { toValue: 0, duration: 120, easing: Easing.in(Easing.quad), useNativeDriver: NATIVE }).start(() => { onClose(); then?.(); });
+  return (
+    <View style={styles.overlayLayer}>
+      <Pressable accessibilityLabel="Close menu" onPress={() => close()} style={StyleSheet.absoluteFill} />
+      <Animated.View
+        style={[styles.menu, { right, bottom, opacity: anim, transform: [
+          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+          { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) },
+        ] }]}>
+        <BlurView intensity={40} style={StyleSheet.absoluteFill} tint="light" />
+        {items.map((item, index) => (
+          <View key={item.key}>
+            {item.danger && index > 0 ? <View style={styles.menuDivider} /> : null}
+            <Pressable
+              accessibilityRole="menuitem"
+              onPress={() => close(item.onPress)}
+              style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
+              <IconifyIcon color={item.danger ? '#D93D42' : '#1B1C1E'} name={item.icon} size={17} />
+              <Text style={[styles.menuText, item.danger && styles.menuTextDanger]}>{item.label}</Text>
+            </Pressable>
+          </View>
+        ))}
+      </Animated.View>
+    </View>
+  );
+}
+
+type DialogAction = { label: string; onPress: () => void; tone?: 'primary' | 'danger' | 'plain' };
+
+/** Small centred confirmation sheet used for "save changes?" and "delete?". */
+function Dialog({ title, message, actions, onDismiss, busy }: {
+  title: string; message: string; actions: DialogAction[]; onDismiss: () => void; busy?: boolean;
+}) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(anim, { toValue: 1, damping: 22, stiffness: 300, mass: 0.8, useNativeDriver: NATIVE }).start();
+  }, [anim]);
+  return (
+    <View style={[styles.overlayLayer, styles.dialogLayer]}>
+      <Animated.View style={[StyleSheet.absoluteFill, styles.dialogScrim, { opacity: anim }]}>
+        <Pressable accessibilityLabel="Dismiss" disabled={busy} onPress={onDismiss} style={{ flex: 1 }} />
+      </Animated.View>
+      <Animated.View
+        accessibilityRole="alert"
+        style={[styles.dialog, { opacity: anim, transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }] }]}>
+        <BlurView intensity={50} style={StyleSheet.absoluteFill} tint="light" />
+        <Text style={styles.dialogTitle}>{title}</Text>
+        <Text style={styles.dialogMessage}>{message}</Text>
+        <View style={styles.dialogActions}>
+          {actions.map((action) => (
+            <Pressable
+              disabled={busy}
+              key={action.label}
+              onPress={action.onPress}
+              style={({ pressed }) => [
+                styles.dialogBtn,
+                action.tone === 'primary' && styles.dialogBtnPrimary,
+                action.tone === 'danger' && styles.dialogBtnDanger,
+                (pressed || busy) && styles.pressed,
+              ]}>
+              <Text style={[styles.dialogBtnText, (action.tone === 'primary' || action.tone === 'danger') && styles.dialogBtnTextStrong]}>
+                {action.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
+export function WorkflowCanvas({ showGmailConnection = false, workflowId }: { showGmailConnection?: boolean; workflowId?: string } = {}) {
   const [nodes, setNodes] = useState<FlowNode[]>([]);
   const [history, setHistory] = useState<FlowNode[][]>([]);
   const [future, setFuture] = useState<FlowNode[][]>([]);
@@ -455,6 +537,11 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
   const [configAnim] = useState(() => new Animated.Value(0));
   void showGmailConnection; // Accounts are now connected inside each step's drawer.
   const [aiOpen, setAiOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dialog, setDialog] = useState<'leave' | 'delete' | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Snapshot of the last saved editor state; null for a canvas never saved.
+  const [savedSnap, setSavedSnap] = useState<string | null>(null);
 
   const { pos, width, height } = useMemo(() => layout(nodes), [nodes]);
 
@@ -940,6 +1027,7 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
 
   // New workflows get the next free per-user default name: Untitled1, Untitled2, …
   useEffect(() => {
+    if (workflowId) return;
     let alive = true;
     workflowsApi.list().then((list) => {
       const used = new Set(list.map((w) => w.name));
@@ -948,14 +1036,55 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
       if (alive) setName((current) => current || `Untitled${n}`);
     }).catch(() => { if (alive) setName((current) => current || 'Untitled1'); });
     return () => { alive = false; };
-  }, []);
+  }, [workflowId]);
 
-  const renameWorkflow = (value: string) => {
-    setName(value);
-    if (workflow) workflowsApi.update(workflow.id, { name: value }).then(setWorkflow).catch(() => showNotice('The name could not be saved.', true));
+  // Frame a reopened workflow once its cards have been laid out.
+  const fitAfterLoad = useRef(false);
+  useEffect(() => {
+    if (!fitAfterLoad.current || !nodes.length) return;
+    fitAfterLoad.current = false;
+    fit();
+  }, [fit, nodes.length]);
+
+  // Reopen a saved workflow exactly as it was left.
+  useEffect(() => {
+    if (!workflowId) return;
+    let alive = true;
+    workflowsApi.get(workflowId).then((loaded) => {
+      if (!alive) return;
+      const loadedNodes = (loaded.canvas?.nodes ?? []) as FlowNode[];
+      const loadedSteps = (loaded.canvas?.steps ?? {}) as Record<string, StepDraft>;
+      setWorkflow(loaded);
+      setName(loaded.name);
+      setNodes(loadedNodes);
+      setStepDrafts(loadedSteps);
+      setSavedSnap(JSON.stringify({ name: loaded.name, nodes: loadedNodes, steps: loadedSteps }));
+      fitAfterLoad.current = true;
+    }).catch((error: unknown) => showNotice(error instanceof Error ? error.message : 'This workflow could not be opened.', true));
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workflowId]);
+
+  const snapshot = useMemo(() => JSON.stringify({ name, nodes, steps: stepDrafts }), [name, nodes, stepDrafts]);
+  const dirty = savedSnap === null ? nodes.length > 0 : snapshot !== savedSnap;
+
+  const renameWorkflow = (value: string) => setName(value);
+
+  const leave = () => (router.canGoBack() ? router.back() : router.replace('/dashboard'));
+  const goBack = () => (dirty ? setDialog('leave') : leave());
+
+  // Android back asks before discarding changes (open drawers handle back first).
+  const backRef = useRef(() => false);
+  backRef.current = () => {
+    if (menuOpen) { setMenuOpen(false); return true; }
+    if (dialog) { if (!saving) setDialog(null); return true; }
+    goBack();
+    return true;
   };
-
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/dashboard'));
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => backRef.current());
+    return () => sub.remove();
+  }, []);
 
   const openStepConfig = (key: string) => {
     const node = nodes.find((n) => n.key === key);
@@ -985,6 +1114,84 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
 
   const showNotice = (text: string, error = false) => setNotice({ text, error });
 
+  const canvasState = () => ({ nodes: nodes as unknown[], steps: stepDrafts as Record<string, unknown> });
+  const workflowName = () => (name.trim() || 'Untitled1').slice(0, 120);
+
+  /** The runnable definition, or null while any step on the main path is unfinished. */
+  const definition = (): { trigger: WorkflowStepConfig; steps: WorkflowStepConfig[] } | null => {
+    if (path.error || !path.nodes.length) return null;
+    const configs = path.nodes.map((n): WorkflowStepConfig | null => {
+      const draft = stepDrafts[n.key];
+      if (!draft?.operation) return null;
+      const input = Object.fromEntries(Object.entries(draft.input).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+      return { id: n.key, app: n.id, operation: draft.operation, connectionId: draft.connectionId, input };
+    });
+    if (configs.some((c) => !c)) return null;
+    const [trigger, ...steps] = configs as WorkflowStepConfig[];
+    return { trigger, steps };
+  };
+
+  /** Saves the canvas as-is (incomplete drafts included) for this user. */
+  const saveDraft = async (): Promise<Workflow> => {
+    const snap = snapshot;
+    const base = { name: workflowName(), canvas: canvasState() };
+    const full = definition();
+    const send = (body: Parameters<typeof workflowsApi.create>[0]) =>
+      workflow ? workflowsApi.update(workflow.id, body) : workflowsApi.create(body);
+    let saved: Workflow;
+    try {
+      saved = await send({ ...base, ...(full ?? { trigger: null, steps: [] }) });
+    } catch (error) {
+      // A definition the server can't accept yet still saves as a layout-only draft.
+      if (!full || !(error instanceof ApiError) || error.status !== 400 || workflow?.status === 'active') throw error;
+      saved = await send({ ...base, trigger: null, steps: [] });
+    }
+    setWorkflow(saved);
+    setSavedSnap(snap);
+    return saved;
+  };
+
+  const saveFromMenu = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const saved = await saveDraft();
+      showNotice(saved.status === 'active' ? 'Changes saved.' : 'Saved to your drafts.');
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : 'The workflow could not be saved.', true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveAndLeave = async () => {
+    setSaving(true);
+    try {
+      await saveDraft();
+      setDialog(null);
+      leave();
+    } catch (error) {
+      setDialog(null);
+      showNotice(error instanceof Error ? error.message : 'The workflow could not be saved.', true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteWorkflow = async () => {
+    setSaving(true);
+    try {
+      if (workflow) await workflowsApi.remove(workflow.id);
+      setDialog(null);
+      leave();
+    } catch (error) {
+      setDialog(null);
+      showNotice(error instanceof Error ? error.message : 'The workflow could not be deleted.', true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   /** Creates or updates the backend workflow from the canvas' main path. */
   const saveWorkflow = async (): Promise<Workflow> => {
     if (path.error) throw new Error(path.error);
@@ -996,13 +1203,16 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
       return { id: n.key, app: n.id, operation: draft.operation, connectionId: draft.connectionId, input };
     };
     const [triggerNode, ...actionNodes] = path.nodes;
+    const snap = snapshot;
     const body = {
-      name: (name.trim() || 'Untitled1').slice(0, 120),
+      name: workflowName(),
       trigger: toConfig(triggerNode),
       steps: actionNodes.map(toConfig),
+      canvas: canvasState(),
     };
     const saved = workflow ? await workflowsApi.update(workflow.id, body) : await workflowsApi.create(body);
     setWorkflow(saved);
+    setSavedSnap(snap);
     return saved;
   };
 
@@ -1348,7 +1558,7 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
             <Pressable accessibilityLabel="Undo" disabled={!history.length} onPress={undo} style={styles.toolBtn}>
               <IconifyIcon color={history.length ? '#2A2B2D' : '#B5B6B2'} name="lucide:undo-2" size={18} />
             </Pressable>
-            <Pressable accessibilityLabel="Fit" onPress={() => fit()} style={styles.toolBtn}>
+            <Pressable accessibilityLabel="More options" onPress={() => setMenuOpen(true)} style={[styles.toolBtn, menuOpen && styles.toolBtnActive]}>
               <IconifyIcon color="#2A2B2D" name="lucide:ellipsis" size={19} />
             </Pressable>
           </View>
@@ -1408,6 +1618,45 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
         </View>
 
         {aiOpen ? <AiChatDrawer onClosed={() => setAiOpen(false)} /> : null}
+
+        {menuOpen ? (
+          <ContextMenu
+            bottom={20 + 56 + 10}
+            items={[
+              { key: 'save', label: saving ? 'Saving…' : 'Save', icon: 'lucide:save', onPress: () => void saveFromMenu() },
+              { key: 'share', label: 'Share', icon: 'lucide:share-2', onPress: () => showNotice('Sharing is coming soon.') },
+              { key: 'delete', label: 'Delete', icon: 'lucide:trash-2', danger: true, onPress: () => setDialog('delete') },
+            ]}
+            onClose={() => setMenuOpen(false)}
+            right={Math.max(12, (view.w - TOOLBAR_W) / 2)}
+          />
+        ) : null}
+
+        {dialog === 'leave' ? (
+          <Dialog
+            actions={[
+              { label: 'Don’t save', onPress: () => { setDialog(null); leave(); } },
+              { label: saving ? 'Saving…' : 'Save', tone: 'primary', onPress: () => void saveAndLeave() },
+            ]}
+            busy={saving}
+            message={workflow?.status === 'active' ? 'Save your changes to this live workflow before leaving?' : 'Keep your changes in Drafts so you can pick up where you left off.'}
+            onDismiss={() => setDialog(null)}
+            title="Save changes?"
+          />
+        ) : null}
+
+        {dialog === 'delete' ? (
+          <Dialog
+            actions={[
+              { label: 'Cancel', onPress: () => setDialog(null) },
+              { label: saving ? 'Deleting…' : 'Delete', tone: 'danger', onPress: () => void deleteWorkflow() },
+            ]}
+            busy={saving}
+            message={workflow ? `“${name || 'This workflow'}” and its run history will be removed. This can’t be undone.` : 'This unsaved workflow will be discarded.'}
+            onDismiss={() => setDialog(null)}
+            title="Delete workflow?"
+          />
+        ) : null}
 
         {target ? (
           <Drawer anim={drawerAnim} onClose={closeDrawer} onPick={pick} title={drawerTitle} />
@@ -1777,6 +2026,56 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  toolBtnActive: { backgroundColor: '#E9E9E6' },
+  overlayLayer: { ...StyleSheet.absoluteFill, zIndex: 120, elevation: 120 } as object,
+  menu: {
+    position: 'absolute',
+    minWidth: 188,
+    paddingVertical: 6,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.7)',
+    shadowColor: '#14161A',
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+    transformOrigin: 'bottom right',
+  } as object,
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 6, paddingHorizontal: 12, height: 44, borderRadius: 14 },
+  menuItemPressed: { backgroundColor: 'rgba(20,21,24,0.06)' },
+  menuText: { fontSize: 14.5, fontWeight: '600', color: '#1B1C1E', letterSpacing: -0.2 },
+  menuTextDanger: { color: '#D93D42' },
+  menuDivider: { height: StyleSheet.hairlineWidth, marginVertical: 4, marginHorizontal: 18, backgroundColor: 'rgba(20,21,24,0.12)' },
+  dialogLayer: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+  dialogScrim: { backgroundColor: 'rgba(14,15,17,0.28)' },
+  dialog: {
+    width: '100%',
+    maxWidth: 340,
+    paddingTop: 22,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderRadius: 26,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.7)',
+    shadowColor: '#14161A',
+    shadowOpacity: 0.2,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 16,
+  },
+  dialogTitle: { fontSize: 18, fontWeight: '700', color: '#141518', letterSpacing: -0.4, textAlign: 'center' },
+  dialogMessage: { marginTop: 8, fontSize: 13.5, lineHeight: 19, color: '#6B6D68', textAlign: 'center' },
+  dialogActions: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  dialogBtn: { flex: 1, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,21,24,0.06)' },
+  dialogBtnPrimary: { backgroundColor: '#141518' },
+  dialogBtnDanger: { backgroundColor: '#D93D42' },
+  dialogBtnText: { fontSize: 14.5, fontWeight: '600', color: '#1B1C1E', letterSpacing: -0.2 },
+  dialogBtnTextStrong: { color: '#FFFFFF' },
   notice: {
     position: 'absolute', left: 16, right: 16, zIndex: 40, flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DDE8E1',
