@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   BackHandler,
+  Keyboard,
   Easing,
   LayoutAnimation,
   LayoutChangeEvent,
@@ -15,6 +16,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Path, Pattern, Rect, Stop } from 'react-native-svg';
 
@@ -209,37 +211,63 @@ function useHeaderMetrics() {
   return { k, btn, top, bottom: top + btn + 14 };
 }
 
-function Header({ onRun, running }: { onRun: () => void; running: boolean }) {
+function Header({ name, onName, onBack, onPublish, busy, active }: {
+  name: string; onName: (v: string) => void; onBack: () => void; onPublish: () => void; busy: boolean; active: boolean;
+}) {
   const { k, btn, top } = useHeaderMetrics();
-  const dot = btn - 8;
+  const [draft, setDraft] = useState(name);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) return;
+    const sub = Keyboard.addListener('keyboardDidHide', () => setFocused(false));
+    return () => sub.remove();
+  }, [focused]);
+  useEffect(() => setDraft(name), [name]);
+  const commitName = () => {
+    setFocused(false);
+    const v = draft.trim();
+    if (v && v !== name) onName(v.slice(0, 120)); else setDraft(name);
+  };
   return (
     <View
       pointerEvents="box-none"
-      style={[styles.header, { paddingTop: top, paddingHorizontal: Math.round(14 * k) }]}>
+      style={[styles.header, { paddingTop: top, paddingHorizontal: Math.round(14 * k), gap: Math.round(12 * k) }]}>
       <Pressable
-        accessibilityLabel="Menu"
-        style={[styles.menuBtn, { width: btn, height: btn, borderRadius: btn / 2 }]}>
-        <IconifyIcon color="#FFFFFF" name="lucide:menu" size={Math.round(20 * k)} />
+        accessibilityLabel="Back"
+        hitSlop={6}
+        onPress={onBack}
+        style={({ pressed }) => [styles.backBtn, { width: btn, height: btn, borderRadius: btn / 2 }, pressed && styles.pressed]}>
+        <IconifyIcon color="#1B1C1E" name="lucide:arrow-left" size={Math.round(20 * k)} />
       </Pressable>
-      <Pressable
-        accessibilityLabel="Run once"
-        onPress={onRun}
-        style={[styles.runPill, { height: btn, borderRadius: btn / 2 }]}>
-        <View style={[styles.runDot, { width: dot, height: dot, borderRadius: dot / 2 }]}>
-          <IconifyIcon
-            color="#FFFFFF"
-            name={running ? 'lucide:loader' : 'lucide:play'}
-            size={Math.round(15 * k)}
+      <View onTouchStart={(e) => e.stopPropagation()} style={styles.titleWrap}>
+        {focused ? (
+          <TextInput
+            accessibilityLabel="Workflow name"
+            autoFocus
+            maxLength={120}
+            onBlur={commitName}
+            onChangeText={setDraft}
+            onSubmitEditing={commitName}
+            placeholder="Untitled"
+            placeholderTextColor="#A3A6AD"
+            returnKeyType="done"
+            selectTextOnFocus
+            style={[styles.titleInput, { fontSize: Math.round(18 * k) }]}
+            value={draft}
           />
-        </View>
-        <Text style={[styles.runText, { fontSize: Math.round(14 * k) }]}>
-          {running ? 'Running…' : 'Run once'}
-        </Text>
-      </Pressable>
+        ) : (
+          <Pressable accessibilityLabel={`Rename workflow ${name}`} accessibilityRole="button" onPress={() => setFocused(true)} style={styles.titleBtn}>
+            <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.titleText, { fontSize: Math.round(18 * k) }]}>{name || 'Untitled'}</Text>
+          </Pressable>
+        )}
+      </View>
       <Pressable
-        accessibilityLabel="Search"
-        style={[styles.searchBtn, { width: btn, height: btn, borderRadius: btn / 2 }]}>
-        <IconifyIcon color="#1B1C1E" name="lucide:search" size={Math.round(19 * k)} />
+        accessibilityLabel={active ? 'Update published workflow' : 'Publish workflow'}
+        disabled={busy}
+        onPress={onPublish}
+        style={({ pressed }) => [styles.publishBtn, { height: btn, borderRadius: btn / 2, paddingHorizontal: Math.round(16 * k) }, active && styles.publishBtnLive, (pressed || busy) && styles.pressed]}>
+        <IconifyIcon color={active ? '#21825B' : '#141518'} name={busy ? 'lucide:loader' : active ? 'lucide:circle-check' : 'lucide:upload'} size={Math.round(16 * k)} />
+        <Text style={[styles.publishText, { fontSize: Math.round(14 * k) }, active && styles.publishTextLive]}>{active ? 'Published' : 'Publish'}</Text>
       </Pressable>
     </View>
   );
@@ -409,6 +437,8 @@ function Drawer({
 export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConnection?: boolean } = {}) {
   const [nodes, setNodes] = useState<FlowNode[]>([]);
   const [history, setHistory] = useState<FlowNode[][]>([]);
+  const [future, setFuture] = useState<FlowNode[][]>([]);
+  const [name, setName] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const header = useHeaderMetrics();
   const [target, setTarget] = useState<DrawerTarget | null>(null);
@@ -645,6 +675,7 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
 
   const commit = (next: FlowNode[]) => {
     setHistory((h) => [...h.slice(-30), nodes]);
+    setFuture([]);
     setNodes(next);
   };
 
@@ -895,8 +926,36 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
     const prev = history[history.length - 1];
     if (!prev) return;
     setHistory((h) => h.slice(0, -1));
+    setFuture((f) => [...f.slice(-30), nodes]);
     setNodes(prev);
   };
+
+  const redo = () => {
+    const next = future[future.length - 1];
+    if (!next) return;
+    setFuture((f) => f.slice(0, -1));
+    setHistory((h) => [...h.slice(-30), nodes]);
+    setNodes(next);
+  };
+
+  // New workflows get the next free per-user default name: Untitled1, Untitled2, …
+  useEffect(() => {
+    let alive = true;
+    workflowsApi.list().then((list) => {
+      const used = new Set(list.map((w) => w.name));
+      let n = 1;
+      while (used.has(`Untitled${n}`)) n += 1;
+      if (alive) setName((current) => current || `Untitled${n}`);
+    }).catch(() => { if (alive) setName((current) => current || 'Untitled1'); });
+    return () => { alive = false; };
+  }, []);
+
+  const renameWorkflow = (value: string) => {
+    setName(value);
+    if (workflow) workflowsApi.update(workflow.id, { name: value }).then(setWorkflow).catch(() => showNotice('The name could not be saved.', true));
+  };
+
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/dashboard'));
 
   const openStepConfig = (key: string) => {
     const node = nodes.find((n) => n.key === key);
@@ -938,7 +997,7 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
     };
     const [triggerNode, ...actionNodes] = path.nodes;
     const body = {
-      name: `${triggerNode.label} → ${actionNodes.map((n) => n.label).join(' → ')}`.slice(0, 120),
+      name: (name.trim() || 'Untitled1').slice(0, 120),
       trigger: toConfig(triggerNode),
       steps: actionNodes.map(toConfig),
     };
@@ -994,6 +1053,7 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
         <View
           {...pan.panHandlers}
           onLayout={onLayout}
+          onTouchStart={() => Keyboard.dismiss()}
           ref={canvasRef as never}
           style={styles.canvas}>
           <CanvasBackground />
@@ -1272,11 +1332,12 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
           </View>
 
           <View pointerEvents={dragKey ? 'none' : 'auto'} style={[styles.toolbar, dragKey && { opacity: 0 }]}>
-            <Pressable accessibilityLabel={workflow?.status === 'active' ? 'Save and keep workflow on' : 'Publish workflow'} onPress={() => void publish()} style={styles.toolBtn}>
-              <IconifyIcon color={workflow?.status === 'active' ? '#21825B' : '#2A2B2D'} name={workflow?.status === 'active' ? 'lucide:circle-check' : 'lucide:save'} size={18} />
+            <Pressable accessibilityLabel={running ? 'Test run in progress' : 'Test run'} disabled={running} onPress={() => void run()} style={styles.toolBtn}>
+              <IconifyIcon color="#1B1C1E" name={running ? 'lucide:loader' : 'lucide:play'} size={17} />
+              <Text style={styles.testLabel}>{running ? 'Testing' : 'Test'}</Text>
             </Pressable>
-            <Pressable accessibilityLabel="Export" style={styles.toolBtn}>
-              <IconifyIcon color="#2A2B2D" name="lucide:download" size={18} />
+            <Pressable accessibilityLabel="Redo" disabled={!future.length} onPress={redo} style={styles.toolBtn}>
+              <IconifyIcon color={future.length ? '#2A2B2D' : '#B5B6B2'} name="lucide:redo-2" size={18} />
             </Pressable>
             <Pressable
               accessibilityLabel="Open AI chat"
@@ -1284,14 +1345,21 @@ export function WorkflowCanvas({ showGmailConnection = false }: { showGmailConne
               style={[styles.toolPrimary, aiOpen && { opacity: 0 }]}>
               <AiMark />
             </Pressable>
-            <Pressable accessibilityLabel="Undo" onPress={undo} style={styles.toolBtn}>
+            <Pressable accessibilityLabel="Undo" disabled={!history.length} onPress={undo} style={styles.toolBtn}>
               <IconifyIcon color={history.length ? '#2A2B2D' : '#B5B6B2'} name="lucide:undo-2" size={18} />
             </Pressable>
             <Pressable accessibilityLabel="Fit" onPress={() => fit()} style={styles.toolBtn}>
               <IconifyIcon color="#2A2B2D" name="lucide:ellipsis" size={19} />
             </Pressable>
           </View>
-          <Header onRun={() => void run()} running={running} />
+          <Header
+            active={workflow?.status === 'active'}
+            busy={running}
+            name={name}
+            onBack={goBack}
+            onName={renameWorkflow}
+            onPublish={() => void publish()}
+          />
 
           {notice ? <Pressable accessibilityRole="alert" onPress={() => setNotice(null)}
             style={[styles.notice, notice.error && styles.noticeError, { top: header.top + header.btn + 12 }]}>
@@ -1415,33 +1483,31 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 5 },
     elevation: 6,
   },
-  runPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingLeft: 5,
-    paddingRight: 18,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#EEEEEC',
-  },
-  runDot: {
-    width: 38,
+  backBtn: { backgroundColor: '#F5F5F3', alignItems: 'center', justifyContent: 'center' },
+  pressed: { opacity: 0.7, transform: [{ scale: 0.97 }] },
+  titleWrap: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  titleBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, maxWidth: '100%', paddingHorizontal: 8, height: 36 },
+  titleText: { flexShrink: 1, textAlign: 'center', fontWeight: '700', color: '#141518', letterSpacing: -0.4, lineHeight: 24 },
+  titleInput: {
+    alignSelf: 'stretch',
+    width: '100%',
+    minWidth: 0,
     height: 38,
-    borderRadius: 19,
-    backgroundColor: '#141518',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  runText: { fontSize: 13, fontWeight: '600', color: '#141518', letterSpacing: -0.2 },
-  searchBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    paddingVertical: 0,
+    paddingHorizontal: 10,
+    borderRadius: 10,
     backgroundColor: '#F5F5F3',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    textAlign: 'center',
+    fontWeight: '700',
+    color: '#141518',
+    letterSpacing: -0.3,
+    outlineStyle: 'none',
+  } as object,
+  publishBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#F5F5F3' },
+  publishBtnLive: { backgroundColor: '#E8F6EF' },
+  publishText: { fontWeight: '600', color: '#141518', letterSpacing: -0.2 },
+  publishTextLive: { color: '#21825B' },
+  testLabel: { marginTop: 2, fontSize: 10, lineHeight: 12, fontWeight: '600', color: '#1B1C1E', letterSpacing: 0.2 },
   canvas: {
     flex: 1,
     overflow: 'hidden',
