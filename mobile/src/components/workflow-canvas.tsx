@@ -36,6 +36,9 @@ const MIN_SCALE = 0.4;
 const MAX_SCALE = 2.2;
 const FIT_MIN_SCALE = 0.75;
 const NATIVE = Platform.OS !== 'web';
+// Android's BlurView flickers while its parent animates, and elevation shadows show
+// through translucent fills; Android uses a near-opaque surface instead.
+const USE_BLUR = false;
 const TRASH = '__trash__';
 const TOOLBAR_W = 56 * 4 + 64 + 8 * 4 + 8; // four tool buttons, the AI button, gaps and padding
 const SLOT_DY = ROW; // "add after" slot sits one row below an end card
@@ -454,15 +457,14 @@ function ContextMenu({ items, onClose, right, bottom }: { items: MenuItem[]; onC
           { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
           { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) },
         ] }]}>
-        <BlurView intensity={40} style={StyleSheet.absoluteFill} tint="light" />
-        {items.map((item, index) => (
-          <View key={item.key}>
-            {item.danger && index > 0 ? <View style={styles.menuDivider} /> : null}
+        {USE_BLUR ? <BlurView intensity={40} style={StyleSheet.absoluteFill} tint="light" /> : null}
+        {items.map((item) => (
+          <View collapsable={false} key={item.key} style={styles.menuRow}>
             <Pressable
               accessibilityRole="menuitem"
               onPress={() => close(item.onPress)}
               style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}>
-              <IconifyIcon color={item.danger ? '#D93D42' : '#1B1C1E'} name={item.icon} size={17} />
+              <IconifyIcon color={item.danger ? '#E0242B' : '#141518'} name={item.icon} size={22} />
               <Text style={[styles.menuText, item.danger && styles.menuTextDanger]}>{item.label}</Text>
             </Pressable>
           </View>
@@ -490,7 +492,7 @@ function Dialog({ title, message, actions, onDismiss, busy }: {
       <Animated.View
         accessibilityRole="alert"
         style={[styles.dialog, { opacity: anim, transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }] }]}>
-        <BlurView intensity={50} style={StyleSheet.absoluteFill} tint="light" />
+        {USE_BLUR ? <BlurView intensity={50} style={StyleSheet.absoluteFill} tint="light" /> : null}
         <Text style={styles.dialogTitle}>{title}</Text>
         <Text style={styles.dialogMessage}>{message}</Text>
         <View style={styles.dialogActions}>
@@ -2030,25 +2032,21 @@ const styles = StyleSheet.create({
   overlayLayer: { ...StyleSheet.absoluteFill, zIndex: 120, elevation: 120 } as object,
   menu: {
     position: 'absolute',
-    minWidth: 188,
-    paddingVertical: 6,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.7)',
-    shadowColor: '#14161A',
-    shadowOpacity: 0.16,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
+    minWidth: 224,
+    paddingVertical: 10,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.93)',
+    // An outset box-shadow is painted only outside the card, so it stays clean
+    // behind the translucent fill on every platform (unlike Android elevation).
+    boxShadow: '0 4px 18px rgba(20,22,26,0.10), 0 1px 4px rgba(20,22,26,0.05)',
+    ...Platform.select({ web: { backdropFilter: 'blur(12px)' }, default: {} }),
     transformOrigin: 'bottom right',
   } as object,
-  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 6, paddingHorizontal: 12, height: 44, borderRadius: 14 },
-  menuItemPressed: { backgroundColor: 'rgba(20,21,24,0.06)' },
-  menuText: { fontSize: 14.5, fontWeight: '600', color: '#1B1C1E', letterSpacing: -0.2 },
-  menuTextDanger: { color: '#D93D42' },
-  menuDivider: { height: StyleSheet.hairlineWidth, marginVertical: 4, marginHorizontal: 18, backgroundColor: 'rgba(20,21,24,0.12)' },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 18, marginHorizontal: 6, paddingHorizontal: 16, height: 54, borderRadius: 16 },
+  menuItemPressed: { backgroundColor: 'rgba(20,21,24,0.04)' },
+  menuText: { fontSize: 16, fontWeight: '400', color: '#141518', letterSpacing: -0.1 },
+  menuTextDanger: { color: '#E0242B' },
+  menuRow: { backgroundColor: 'transparent' },
   dialogLayer: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
   dialogScrim: { backgroundColor: 'rgba(14,15,17,0.28)' },
   dialog: {
@@ -2059,14 +2057,14 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderRadius: 26,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.86)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.7)',
-    shadowColor: '#14161A',
-    shadowOpacity: 0.2,
-    shadowRadius: 30,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 16,
+    borderColor: 'rgba(20,21,24,0.05)',
+    ...Platform.select({
+      android: { elevation: 16 },
+      web: { boxShadow: '0 20px 48px rgba(20,22,26,0.16)' },
+      default: { shadowColor: '#14161A', shadowOpacity: 0.16, shadowRadius: 28, shadowOffset: { width: 0, height: 14 } },
+    }),
   },
   dialogTitle: { fontSize: 18, fontWeight: '700', color: '#141518', letterSpacing: -0.4, textAlign: 'center' },
   dialogMessage: { marginTop: 8, fontSize: 13.5, lineHeight: 19, color: '#6B6D68', textAlign: 'center' },
