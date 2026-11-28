@@ -14,6 +14,9 @@ import { Workflow, WorkflowDocument, WorkflowStep } from './schemas/workflow.sch
 import { TriggerScheduler } from './trigger-scheduler.service';
 import { toStepRef, WorkflowEngine } from './workflow-engine.service';
 
+/** Fair-use cap on workflows a single user can have turned on (like Zapier plan limits). */
+const MAX_ACTIVE_PER_USER = Number(process.env.MAX_ACTIVE_WORKFLOWS_PER_USER ?? 100);
+
 @Injectable()
 export class WorkflowsService {
   constructor(
@@ -90,6 +93,12 @@ export class WorkflowsService {
   /** Turns the workflow on. Only events after this activation boundary can start runs. */
   async activate(userId: string, id: string) {
     const workflow = await this.findOwned(userId, id);
+    if (workflow.status !== 'active') {
+      const activeCount = await this.workflows.countDocuments({ userId: workflow.userId, status: 'active' }).exec();
+      if (activeCount >= MAX_ACTIVE_PER_USER) {
+        throw new BadRequestException({ message: [`You can have up to ${MAX_ACTIVE_PER_USER} workflows turned on. Stop one to publish this.`], code: 'ACTIVE_LIMIT' });
+      }
+    }
     await this.validateForActivation(userId, requireTrigger(workflow), workflow.steps);
     workflow.set({
       status: 'active',
@@ -104,9 +113,10 @@ export class WorkflowsService {
 
   async pause(userId: string, id: string) {
     const workflow = await this.findOwned(userId, id);
+    // Unschedule first so no new poll starts; a check already in progress just finishes.
+    await this.scheduler.unschedule(workflow.id as string);
     workflow.set({ status: 'paused', statusReason: undefined });
     await workflow.save();
-    await this.scheduler.unschedule(workflow.id as string);
     return present(workflow);
   }
 

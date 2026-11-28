@@ -3,6 +3,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Queue } from 'bullmq';
 import { Model } from 'mongoose';
+import { createHash } from 'node:crypto';
 import { TRIGGER_POLL_QUEUE, TriggerPollJob } from '../queue/queue.constants';
 import { runsWorkers } from './process-role';
 import { Workflow } from './schemas/workflow.schema';
@@ -17,11 +18,22 @@ export class TriggerScheduler implements OnApplicationBootstrap {
     @InjectModel(Workflow.name) private readonly workflows: Model<Workflow>,
   ) {}
 
+  /**
+   * Polls each workflow on its own fixed phase inside the interval (like Zapier), so
+   * thousands of workflows are spread evenly instead of all firing at the same instant
+   * after a deploy or a burst of activations. The phase is derived from the id, so
+   * re-scheduling the same workflow keeps its slot.
+   */
   async schedule(workflow: { id: string; pollIntervalSeconds: number }) {
+    const every = workflow.pollIntervalSeconds * 1000;
+    const phase = createHash('sha1').update(workflow.id).digest().readUInt32BE(0) % every;
+    const now = Date.now();
+    let start = Math.floor(now / every) * every + phase;
+    if (start <= now) start += every;
     await this.queue.upsertJobScheduler(
       schedulerId(workflow.id),
-      { every: workflow.pollIntervalSeconds * 1000 },
-      { name: 'poll', data: { workflowId: workflow.id } },
+      { every, startDate: new Date(start) },
+      { name: 'poll', data: { workflowId: workflow.id }, opts: { removeOnComplete: { count: 200 }, removeOnFail: { count: 1000 } } },
     );
   }
 
@@ -39,10 +51,14 @@ export class TriggerScheduler implements OnApplicationBootstrap {
     if (!runsWorkers() || process.env.SCHEDULER_RECONCILE === 'false') return;
     try {
       let count = 0;
-      for await (const workflow of this.workflows.find({ status: 'active' }).select('_id pollIntervalSeconds').cursor()) {
-        await this.schedule({ id: workflow.id as string, pollIntervalSeconds: workflow.pollIntervalSeconds });
+      let batch: Promise<void>[] = [];
+      for await (const workflow of this.workflows.find({ status: 'active' }).select('_id pollIntervalSeconds').lean().cursor()) {
+        batch.push(this.schedule({ id: String(workflow._id), pollIntervalSeconds: workflow.pollIntervalSeconds }));
         count += 1;
+        // Bounded parallelism keeps a large reconcile fast without flooding Redis.
+        if (batch.length >= 100) { await Promise.all(batch); batch = []; }
       }
+      await Promise.all(batch);
       this.logger.log(`Reconciled ${count} active workflow schedule(s)`);
     } catch (error) {
       this.logger.error(`Schedule reconciliation failed: ${error instanceof Error ? error.message : 'unknown error'}`);

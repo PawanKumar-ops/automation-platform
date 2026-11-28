@@ -122,8 +122,26 @@ function topApps(workflow: Workflow): IconName[] {
     return icons.length ? icons.slice(0, 2) : ['lucide:workflow'];
 }
 
+function timeAgo(iso: string) {
+    return editedAgo(iso).replace('Edited ', '');
+}
+
 function toDraftItem(workflow: Workflow): WorkflowItem {
-    return { id: workflow.id, name: workflow.name, meta: editedAgo(workflow.updatedAt), icons: topApps(workflow), state: 'Draft' };
+    const meta = workflow.status === 'paused' ? `Stopped · ${editedAgo(workflow.updatedAt)}`
+        : workflow.status === 'error' ? 'Turned off · needs attention'
+            : editedAgo(workflow.updatedAt);
+    return { id: workflow.id, name: workflow.name, meta, icons: topApps(workflow), state: 'Draft' };
+}
+
+function toActiveItem(workflow: Workflow): WorkflowItem {
+    return {
+        id: workflow.id,
+        name: workflow.name,
+        meta: workflow.lastRunAt ? `Ran ${timeAgo(workflow.lastRunAt)}` : 'Waiting for events',
+        icons: topApps(workflow),
+        state: 'Active',
+        runs: `every ${Math.round(workflow.pollIntervalSeconds / 60)} min`,
+    };
 }
 
 const WORKFLOWS: {
@@ -343,13 +361,16 @@ export function Dashboard() {
 
     // The user's saved drafts, refreshed whenever the dashboard comes back into view.
     const [drafts, setDrafts] = useState<WorkflowItem[]>([]);
+    const [live, setLive] = useState<WorkflowItem[]>([]);
     useFocusEffect(
         useCallback(() => {
             let alive = true;
             workflowsApi
                 .list()
                 .then((list) => {
-                    if (alive) setDrafts(list.filter((w) => w.status === 'draft').map(toDraftItem));
+                    if (!alive) return;
+                    setDrafts(list.filter((w) => w.status !== 'active').map(toDraftItem));
+                    setLive(list.filter((w) => w.status === 'active').map(toActiveItem));
                 })
                 .catch(() => undefined);
             return () => {
@@ -361,9 +382,9 @@ export function Dashboard() {
     const groupedWorkflows = useMemo(
         () => ({
             drafts,
-            active: WORKFLOWS.filter((workflow) => workflow.state === 'Active'),
+            active: live,
         }),
-        [drafts]
+        [drafts, live]
     );
 
     const submitPrompt = () => {
@@ -551,14 +572,17 @@ export function Dashboard() {
                             <View style={styles.workflowColumn}>
                                 <SectionHeading action="View all" title="Active workflows" />
                                 <View style={styles.workflowList}>
-                                    {groupedWorkflows.active.map((workflow, index, list) => (
+                                    {groupedWorkflows.active.slice(0, 4).map((workflow, index, list) => (
                                         <WorkflowRow
-                                            key={workflow.name}
+                                            key={workflow.id ?? workflow.name}
                                             last={index === list.length - 1}
-                                            onOpen={(name) => setNotice(`Opening ${name}`)}
+                                            onOpen={() => router.push({ pathname: '/canvas', params: { workflowId: workflow.id! } })}
                                             workflow={workflow}
                                         />
                                     ))}
+                                    {!groupedWorkflows.active.length ? (
+                                        <Text style={styles.workflowMeta}>No live workflows. Publish one to run it automatically.</Text>
+                                    ) : null}
                                 </View>
                             </View>
                         </View>

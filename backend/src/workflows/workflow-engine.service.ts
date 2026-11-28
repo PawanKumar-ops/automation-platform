@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Queue } from 'bullmq';
 import { Model, Types } from 'mongoose';
-import { AuthRequiredError, errorMessage, isRetryable } from '../engine/core/errors';
+import { AuthRequiredError, errorMessage, isRetryable, PermanentIntegrationError, RateLimitError } from '../engine/core/errors';
 import { TriggerItem } from '../engine/core/integration.types';
 import { TemplateScope } from '../engine/core/template';
 import { StepRunner, StepRef } from '../integrations/step-runner.service';
@@ -15,7 +15,11 @@ import { TriggerScheduler } from './trigger-scheduler.service';
 const POLL_LEASE_MS = 5 * 60 * 1000;
 const MAX_NEW_ITEMS_PER_POLL = 50;
 const SEEN_ID_CAP = 2000;
+/** Transient failures (with growing backoff) before a workflow is turned off — roughly a day. */
 const MAX_POLL_FAILURES = 10;
+/** Bad configuration never fixes itself; turn off sooner. */
+const MAX_PERMANENT_POLL_FAILURES = 3;
+const MAX_POLL_BACKOFF_MS = 60 * 60 * 1000;
 const STUCK_RUN_MS = 10 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const MAX_INPUT_BYTES = 64 * 1024;
@@ -55,10 +59,15 @@ export class WorkflowEngine {
       {
         _id: workflowId,
         status: 'active',
-        $or: [{ 'triggerState.pollLockUntil': { $exists: false } }, { 'triggerState.pollLockUntil': { $lte: now } }],
+        $and: [
+          { $or: [{ 'triggerState.pollLockUntil': { $exists: false } }, { 'triggerState.pollLockUntil': { $lte: now } }] },
+          // Skip (cheaply) while backing off after failures or a provider rate limit.
+          { $or: [{ 'triggerState.nextPollAt': { $exists: false } }, { 'triggerState.nextPollAt': { $lte: now } }] },
+        ],
       },
       { $set: { 'triggerState.pollLockUntil': new Date(now.getTime() + POLL_LEASE_MS) } },
-      { returnDocument: 'after' },
+      // The editor layout is never needed by the engine; don't load it on every poll.
+      { returnDocument: 'after', projection: { canvas: 0 } },
     ).exec();
     if (!workflow) {
       const current = await this.workflows.findById(workflowId).select('status').exec();
@@ -101,7 +110,7 @@ export class WorkflowEngine {
           'triggerState.lastSuccessAt': now,
           'triggerState.consecutiveFailures': 0,
         },
-        $unset: { 'triggerState.lastError': '', 'triggerState.pollLockUntil': '' },
+        $unset: { 'triggerState.lastError': '', 'triggerState.pollLockUntil': '', 'triggerState.nextPollAt': '' },
       }).exec();
       if (fresh.length) this.logger.log(`Workflow ${workflow.id}: ${fresh.length} new trigger item(s)`);
       await this.requeueStuckRuns(workflow._id);
@@ -194,13 +203,21 @@ export class WorkflowEngine {
   private async recordPollFailure(workflow: WorkflowDocument, error: unknown, now: Date) {
     const message = errorMessage(error);
     const failures = workflow.triggerState.consecutiveFailures + 1;
-    const disable = error instanceof AuthRequiredError || failures >= MAX_POLL_FAILURES;
+    const disable = error instanceof AuthRequiredError
+      || (error instanceof PermanentIntegrationError && failures >= MAX_PERMANENT_POLL_FAILURES)
+      || failures >= MAX_POLL_FAILURES;
+    // Exponential backoff (interval × 2^n, capped at 1 h), or the provider's Retry-After.
+    const intervalMs = workflow.pollIntervalSeconds * 1000;
+    const backoffMs = error instanceof RateLimitError && error.retryAfterMs
+      ? Math.min(Math.max(error.retryAfterMs, intervalMs), MAX_POLL_BACKOFF_MS)
+      : Math.min(intervalMs * 2 ** (failures - 1), MAX_POLL_BACKOFF_MS);
     this.logger.warn(`Workflow ${workflow.id} poll failed (${failures}): ${message}`);
     await this.workflows.updateOne({ _id: workflow._id }, {
       $set: {
         'triggerState.lastPolledAt': now,
         'triggerState.lastError': message,
         'triggerState.consecutiveFailures': failures,
+        'triggerState.nextPollAt': new Date(now.getTime() + backoffMs),
         ...(disable ? { status: 'error', statusReason: error instanceof AuthRequiredError ? message : `Trigger failed ${failures} times in a row: ${message}` } : {}),
       },
       $unset: { 'triggerState.pollLockUntil': '' },

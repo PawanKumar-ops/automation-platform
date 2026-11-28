@@ -50,6 +50,10 @@ export class TriggerState {
   @Prop({ default: 0 })
   consecutiveFailures!: number;
 
+  /** Backoff after failures: scheduled polls before this time are skipped cheaply. */
+  @Prop()
+  nextPollAt?: Date;
+
   /** Lease preventing two workers from polling the same workflow at once. */
   @Prop()
   pollLockUntil?: Date;

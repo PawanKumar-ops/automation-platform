@@ -3,7 +3,7 @@ import { Job } from 'bullmq';
 import { WORKFLOW_RUN_QUEUE, WorkflowRunJob } from '../../queue/queue.constants';
 import { WorkflowEngine } from '../workflow-engine.service';
 
-@Processor(WORKFLOW_RUN_QUEUE, { concurrency: Number(process.env.WORKFLOW_RUN_CONCURRENCY ?? 10) })
+@Processor(WORKFLOW_RUN_QUEUE, { concurrency: Number(process.env.WORKFLOW_RUN_CONCURRENCY ?? 25), lockDuration: 120_000 })
 export class WorkflowRunProcessor extends WorkerHost {
   constructor(private readonly engine: WorkflowEngine) {
     super();

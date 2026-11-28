@@ -1061,6 +1061,8 @@ export function WorkflowCanvas({ showGmailConnection = false, workflowId }: { sh
       setNodes(loadedNodes);
       setStepDrafts(loadedSteps);
       setSavedSnap(JSON.stringify({ name: loaded.name, nodes: loadedNodes, steps: loadedSteps }));
+      // Workflows turned off by the server (revoked account, repeated failures) explain why.
+      if (loaded.status === 'error' && loaded.statusReason) showNotice(`This workflow was turned off: ${loaded.statusReason}`, true);
       fitAfterLoad.current = true;
     }).catch((error: unknown) => showNotice(error instanceof Error ? error.message : 'This workflow could not be opened.', true));
     return () => { alive = false; };
@@ -1175,6 +1177,20 @@ export function WorkflowCanvas({ showGmailConnection = false, workflowId }: { sh
     } catch (error) {
       setDialog(null);
       showNotice(error instanceof Error ? error.message : 'The workflow could not be saved.', true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** Turns a live workflow off; it stops checking for new events until published again. */
+  const stopWorkflow = async () => {
+    if (!workflow || saving) return;
+    setSaving(true);
+    try {
+      setWorkflow(await workflowsApi.pause(workflow.id));
+      showNotice('Workflow stopped. It won’t run again until you publish it.');
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : 'The workflow could not be stopped.', true);
     } finally {
       setSaving(false);
     }
@@ -1626,6 +1642,9 @@ export function WorkflowCanvas({ showGmailConnection = false, workflowId }: { sh
             bottom={20 + 56 + 10}
             items={[
               { key: 'save', label: saving ? 'Saving…' : 'Save', icon: 'lucide:save', onPress: () => void saveFromMenu() },
+              ...(workflow?.status === 'active'
+                ? [{ key: 'stop', label: 'Stop workflow', icon: 'lucide:circle-stop' as const, onPress: () => void stopWorkflow() }]
+                : []),
               { key: 'share', label: 'Share', icon: 'lucide:share-2', onPress: () => showNotice('Sharing is coming soon.') },
               { key: 'delete', label: 'Delete', icon: 'lucide:trash-2', danger: true, onPress: () => setDialog('delete') },
             ]}

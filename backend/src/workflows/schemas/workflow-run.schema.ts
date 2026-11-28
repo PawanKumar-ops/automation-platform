@@ -88,5 +88,7 @@ export class WorkflowRun {
 export const WorkflowRunSchema = SchemaFactory.createForClass(WorkflowRun);
 WorkflowRunSchema.index({ workflowId: 1, triggerItemId: 1 }, { unique: true, name: 'unique_workflow_item' });
 WorkflowRunSchema.index({ userId: 1, workflowId: 1, createdAt: -1 }, { name: 'user_workflow_recent' });
+// Lets every poll find runs that were saved but never enqueued without a collection scan.
+WorkflowRunSchema.index({ workflowId: 1, status: 1, createdAt: 1 }, { name: 'workflow_status_created' });
 // Run history retention (default 30 days). Change and re-create the index to adjust.
 WorkflowRunSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 3600, name: 'run_retention' });
